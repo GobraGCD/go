@@ -1088,6 +1088,14 @@ func (x *Nat) GCDVarTime(a, b *Nat) (*Nat, error) {
 	return x.set(u), nil
 }
 
+// UseSynchronizedWrappingInExtendedGCD switches coefficient updates in
+// extendedGCD between the legacy modular-add path and the synchronized-wrap
+// path.
+//
+// false: legacy behavior (buggy in some edge cases)
+// true: synchronized wrapping fix
+var UseSynchronizedWrappingInExtendedGCD bool
+
 // extendedGCD computes u and A such that u = GCD(a, m) = A*a - B*m.
 //
 // u will have the size of the larger of a and m, and A will have the size of m.
@@ -1155,12 +1163,30 @@ func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
 		if u.IsOdd() == yes && v.IsOdd() == yes {
 			if v.cmpGeq(u) == no {
 				u.sub(v)
-				A.Add(C, &Modulus{nat: m})
-				B.Add(D, &Modulus{nat: a})
+				if UseSynchronizedWrappingInExtendedGCD {
+					A.add(C)
+					B.add(D)
+					if A.cmpGeq(m) == yes {
+						A.sub(m)
+						B.sub(a)
+					}
+				} else {
+					A.Add(C, &Modulus{nat: m})
+					B.Add(D, &Modulus{nat: a})
+				}
 			} else {
 				v.sub(u)
-				C.Add(A, &Modulus{nat: m})
-				D.Add(B, &Modulus{nat: a})
+				if UseSynchronizedWrappingInExtendedGCD {
+					C.add(A)
+					D.add(B)
+					if C.cmpGeq(m) == yes {
+						C.sub(m)
+						D.sub(a)
+					}
+				} else {
+					C.Add(A, &Modulus{nat: m})
+					D.Add(B, &Modulus{nat: a})
+				}
 			}
 		}
 
