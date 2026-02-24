@@ -1,109 +1,72 @@
 package bigmod
 
-import "testing"
+import (
+	stdbig "math/big"
+	"testing"
+)
 
-// TestExtendedGCDWrappingDivergence demonstrates that extendedGCD uses
-// independent wrapping for coefficient updates, which differs from fiat-crypto's
-// synchronized wrapping. With a=2, m=5, the relational invariant
-// v = D*m - C*a breaks after the first v >= u subtraction.
-func TestExtendedGCDWrappingDivergence(t *testing.T) {
-	// --- Part 1: Call extendedGCD(2, 5) and verify the result ---
-	//
-	// extendedGCD computes gcd(a, m) and the Bézout coefficient A
-	// such that A*a ≡ gcd (mod m).
-	a := NewNat().SetUint(2)
-	m := NewNat().SetUint(5)
+func extendedGCDCongruence(a, m uint64, fixed bool) (gcd, congr *stdbig.Int, err error) {
+	UseSynchronizedWrappingInExtendedGCD = fixed
 
-	u, A, err := extendedGCD(a, m)
+	u, A, err := extendedGCD(NewNat().SetUint(uint(a)), NewNat().SetUint(uint(m)))
 	if err != nil {
-		t.Fatal(err)
+		return nil, nil, err
+	}
+	aBig := new(stdbig.Int).SetUint64(a)
+	mBig := new(stdbig.Int).SetUint64(m)
+	gcd = u.asBig()
+	congr = new(stdbig.Int).Mod(new(stdbig.Int).Mul(A.asBig(), aBig), mBig)
+	return gcd, congr, nil
+}
+
+func TestExtendedGCDBehaviorMatrix(t *testing.T) {
+	tests := []struct {
+		name                    string
+		a, m                    uint64
+		expectLegacyEdgeFailure bool
+	}{
+		{name: "small_control", a: 21, m: 15, expectLegacyEdgeFailure: false},
+		{name: "wrapping_edge_case", a: 65537, m: 65536, expectLegacyEdgeFailure: true},
 	}
 
-	uVal := u.IsOdd() // just to use u; we check limbs below
-	_ = uVal
-	t.Logf("extendedGCD(2, 5): u=%d, A=%d", u.limbs[0], A.limbs[0])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			aBig := new(stdbig.Int).SetUint64(tt.a)
+			mBig := new(stdbig.Int).SetUint64(tt.m)
+			wantGCD := new(stdbig.Int)
+			mathBigX := new(stdbig.Int)
+			wantGCD.GCD(mathBigX, nil, aBig, mBig)
+			mathBigCongr := new(stdbig.Int).Mod(new(stdbig.Int).Mul(mathBigX, aBig), mBig)
 
-	if u.limbs[0] != 1 {
-		t.Fatalf("gcd = %d, want 1", u.limbs[0])
-	}
-	if (A.limbs[0]*2)%5 != 1 {
-		t.Fatalf("A*a mod m = %d, want 1", (A.limbs[0]*2)%5)
-	}
-	t.Logf("Correct: %d * 2 = %d ≡ 1 (mod 5)", A.limbs[0], A.limbs[0]*2)
+			legacyGCD, legacyCongr, err := extendedGCDCongruence(tt.a, tt.m, false)
+			if err != nil {
+				t.Fatalf("legacy extendedGCD(%d, %d): %v", tt.a, tt.m, err)
+			}
 
-	// --- Part 2: Reproduce the divergent coefficient update step ---
-	//
-	// Trace of extendedGCD(2, 5):
-	//   Initial:  u=2, v=5, A=1, B=0, C=0, D=1
-	//
-	//   u is even → halve u:
-	//     u=1, A=(1+5)/2=3, B=(0+2)/2=1
-	//
-	//   State:    u=1, v=5, A=3, B=1, C=0, D=1
-	//     relU: 3*2 - 1*5 = 1 = u  ✓
-	//     relV: 1*5 - 0*2 = 5 = v  ✓
-	//
-	//   Both odd, v ≥ u → subtract v -= u = 4, then:
-	//     C.Add(A, mMod):  C = (0+3) mod 5 = 3   (3 < 5, no wrap)
-	//     D.Add(B, aMod):  D = (1+1) mod 2 = 0   (2 ≥ 2, WRAPS!)
-	//
-	//   Fiat-crypto (synchronized wrapping):
-	//     borrow = (C+A ≥ m) = (3 ≥ 5) = false
-	//     C = 3 (same), D = 2 (NOT reduced, follows C's borrow)
-	//     relV: 2*5 - 3*2 = 4 = v'  ✓
-	//
-	//   Go (independent wrapping):
-	//     C = 3, D = 0 (independently reduced since D+B ≥ a)
-	//     relV: 0*5 - 3*2 = -6 ≠ 4  ✗
+			fixedGCD, fixedCongr, err := extendedGCDCongruence(tt.a, tt.m, true)
+			if err != nil {
+				t.Fatalf("fixed extendedGCD(%d, %d): %v", tt.a, tt.m, err)
+			}
 
-	mMod, err := NewModulus([]byte{5})
-	if err != nil {
-		t.Fatal(err)
-	}
-	aMod, err := NewModulus([]byte{2})
-	if err != nil {
-		t.Fatal(err)
-	}
+			t.Logf("math/big  : gcd=%s, coeff*a mod m=%s", wantGCD.String(), mathBigCongr.String())
+			t.Logf("legacy    : gcd=%s, coeff*a mod m=%s", legacyGCD.String(), legacyCongr.String())
+			t.Logf("fixed     : gcd=%s, coeff*a mod m=%s", fixedGCD.String(), fixedCongr.String())
 
-	C := NewNat().SetUint(0)
-	Ac := NewNat().SetUint(3)
-	D := NewNat().SetUint(1)
-	B := NewNat().SetUint(1)
-
-	t.Logf("Before: C=%d, A=%d, D=%d, B=%d", C.limbs[0], Ac.limbs[0], D.limbs[0], B.limbs[0])
-	t.Logf("C+A = %d (vs m=5), D+B = %d (vs a=2)",
-		C.limbs[0]+Ac.limbs[0], D.limbs[0]+B.limbs[0])
-
-	C.Add(Ac, mMod) // independent: wraps if C+A ≥ 5  → 3 < 5: no wrap  → C=3
-	D.Add(B, aMod)   // independent: wraps if D+B ≥ 2  → 2 ≥ 2: WRAPS!  → D=0
-
-	CVal := int(C.limbs[0])
-	DVal := int(D.limbs[0])
-
-	t.Logf("After: C=%d, D=%d", CVal, DVal)
-
-	// Check relV: v' = D'*m - C'*a should equal v' = 4
-	relV := DVal*5 - CVal*2
-	t.Logf("relV = D*m - C*a = %d*5 - %d*2 = %d (want v'=4)", DVal, CVal, relV)
-
-	if relV == 4 {
-		t.Log("relV preserved — wrapping agreed by coincidence")
-	} else {
-		t.Logf("relV BROKEN: got %d, want 4", relV)
-	}
-
-	t.Log("")
-	t.Log("Fiat-crypto (synchronized wrapping) would produce:")
-	t.Log("  borrow = (C+A >= m) = (3 >= 5) = false")
-	t.Log("  C = 3 (same), D = 2 (not reduced, follows C's borrow)")
-	t.Logf("  relV = 2*5 - 3*2 = 4 = v'  (preserved)")
-
-	// Assert the divergence
-	if DVal == 0 {
-		t.Log("CONFIRMED: D wrapped to 0 independently (D+B=2 >= a=2)")
-		t.Log("Fiat-crypto would keep D=2 (synchronized with C's no-wrap)")
-	}
-	if relV != 4 {
-		t.Errorf("relational invariant v = D*m - C*a broken: got %d, want 4", relV)
+			if legacyGCD.Cmp(wantGCD) != 0 || fixedGCD.Cmp(wantGCD) != 0 {
+				t.Fatalf("gcd mismatch: want %s, legacy %s, fixed %s", wantGCD.String(), legacyGCD.String(), fixedGCD.String())
+			}
+			if fixedCongr.Cmp(mathBigCongr) != 0 {
+				t.Fatalf("fixed mode mismatch: got %s want %s", fixedCongr.String(), mathBigCongr.String())
+			}
+			if tt.expectLegacyEdgeFailure {
+				if legacyCongr.Cmp(mathBigCongr) == 0 {
+					t.Fatalf("expected legacy mismatch on edge case, both were %s", legacyCongr.String())
+				}
+			} else {
+				if legacyCongr.Cmp(mathBigCongr) != 0 {
+					t.Fatalf("unexpected legacy mismatch on control case: legacy=%s math/big=%s", legacyCongr.String(), mathBigCongr.String())
+				}
+			}
+		})
 	}
 }
