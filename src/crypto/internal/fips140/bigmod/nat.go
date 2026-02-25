@@ -1164,7 +1164,12 @@ func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
 			if v.cmpGeq(u) == no {
 				u.sub(v)
 				if UseSynchronizedWrappingInExtendedGCD {
-					synchronizedAddReduce(A, C, m, B, D, a)
+					A.add(C)
+					B.add(D)
+					if A.cmpGeq(m) == yes {
+						A.sub(m)
+						B.sub(a)
+					}
 				} else {
 					A.Add(C, &Modulus{nat: m})
 					B.Add(D, &Modulus{nat: a})
@@ -1172,7 +1177,12 @@ func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
 			} else {
 				v.sub(u)
 				if UseSynchronizedWrappingInExtendedGCD {
-					synchronizedAddReduce(C, A, m, D, B, a)
+					C.add(A)
+					D.add(B)
+					if C.cmpGeq(m) == yes {
+						C.sub(m)
+						D.sub(a)
+					}
 				} else {
 					C.Add(A, &Modulus{nat: m})
 					D.Add(B, &Modulus{nat: a})
@@ -1210,31 +1220,6 @@ func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
 			return u, A, nil
 		}
 	}
-}
-
-// synchronizedAddReduce updates the pair (x,y) as:
-//
-//	x = x + addX; y = y + addY
-//
-// and then performs a synchronized single-subtraction reduction:
-//
-//	if x+addX overflows/modX boundary, subtract both modX and modY.
-//
-// This follows Fiat-Crypto's requirement that the two reductions happen in
-// lockstep to preserve the linear relation between coefficients.
-func synchronizedAddReduce(x, addX, modX, y, addY, modY *Nat) {
-	cx := x.add(addX)
-	y.add(addY)
-
-	tx := NewNat().set(x)
-	ux := tx.sub(modX)
-	need := choice(cx) | not(choice(ux))
-
-	ty := NewNat().set(y)
-	ty.sub(modY)
-
-	x.assign(need, tx)
-	y.assign(need, ty)
 }
 
 //go:norace

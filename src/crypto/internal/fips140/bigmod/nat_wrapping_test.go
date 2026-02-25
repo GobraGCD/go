@@ -6,7 +6,9 @@ import (
 )
 
 func extendedGCDCongruence(a, m uint64, fixed bool) (gcd, congr *stdbig.Int, err error) {
+	prev := UseSynchronizedWrappingInExtendedGCD
 	UseSynchronizedWrappingInExtendedGCD = fixed
+	defer func() { UseSynchronizedWrappingInExtendedGCD = prev }()
 
 	u, A, err := extendedGCD(NewNat().SetUint(uint(a)), NewNat().SetUint(uint(m)))
 	if err != nil {

@@ -7,7 +7,9 @@ import (
 )
 
 func keygenLikeConsistencyWithFixedPrimes(pBytes, qBytes []byte, fixed bool) (passes bool, err error) {
+	prev := UseSynchronizedWrappingInExtendedGCD
 	UseSynchronizedWrappingInExtendedGCD = fixed
+	defer func() { UseSynchronizedWrappingInExtendedGCD = prev }()
 
 	p := new(big.Int).SetBytes(pBytes)
 	q := new(big.Int).SetBytes(qBytes)

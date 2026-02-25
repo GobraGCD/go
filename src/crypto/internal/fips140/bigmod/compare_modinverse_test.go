@@ -14,7 +14,9 @@ func setExtendedGCDFixMode(t *testing.T, enabled bool) {
 }
 
 func inverseProduct(a, m uint64, fixed bool) (prod *stdbig.Int, ok bool, err error) {
+	prev := UseSynchronizedWrappingInExtendedGCD
 	UseSynchronizedWrappingInExtendedGCD = fixed
+	defer func() { UseSynchronizedWrappingInExtendedGCD = prev }()
 
 	modInt := new(stdbig.Int).SetUint64(m)
 	aInt := new(stdbig.Int).SetUint64(a)
