@@ -369,7 +369,6 @@ pure func relV(v, C, D, aVal, mVal int) bool {
 *//*@
 ghost
 trusted
-requires a > 0 && b > 0 && a > b
 ensures a % b == (a - b) % b
 decreases
 func modSubLemma(a, b int)
@@ -379,8 +378,11 @@ func modSubLemma(a, b int)
 // Lean 4:
 @*//*
   theorem prodParityLemma {a b : Int} :
-      a * b % 2 = (a % 2) * (b % 2) := by
-    rw [Int.mul_emod]; grind
+      (a * b) % 2 = (a % 2) * (b % 2) := by
+    rw [Int.mul_emod]
+    have ha : a % 2 = 0 ∨ a % 2 = 1 := by omega
+    have hb : b % 2 = 0 ∨ b % 2 = 1 := by omega
+    grind
 *//*@
 ghost
 trusted
@@ -475,75 +477,170 @@ func modAddLemma(A, B, C, D, Ap, Bp, a, m int) {
 	}
 }
 
-// Relational invariant maintenance for subtraction (u > v case):
-// After u -= v, A = (A+C) mod m, B = (B+D) mod a.
+// Relational invariant maintenance for subtraction (u > v case), no-wrap:
+// A' = A + C, B' = B + D (no modular reduction needed).
+// When A+C < m and u-v > 0, B+D < a follows by monotonicity of multiplication:
+//   (A+C)*a < m*a and if B+D >= a then (B+D)*m >= a*m = m*a,
+//   so u-v = (A+C)*a - (B+D)*m < 0, contradicting u-v > 0.
 ghost
+requires relU(uOld, AOld, BOld, aVal, mVal)
+requires relV(vOld, COld, DOld, aVal, mVal)
+requires uNew == uOld - vOld
+requires uNew > 0
+requires aVal > 1 && mVal > 1
+requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
+requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld <= aVal
+requires ANew == AOld + COld
+requires BNew == BOld + DOld
+requires ANew < mVal
+ensures relU(uNew, ANew, BNew, aVal, mVal)
+ensures 0 <= ANew && ANew < mVal
+ensures 0 <= BNew && BNew < aVal
+decreases
+func subRelLemmaNoWrap(uOld, vOld, uNew, AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal int) {
+    subExpandLemma(uOld, vOld, AOld, BOld, COld, DOld, aVal, mVal)
+    // Z3 now knows: uNew == (AOld+COld)*aVal - (BOld+DOld)*mVal, uNew > 0
+    // and ANew == AOld+COld < mVal. Need to show BNew == BOld+DOld < aVal.
+    // By contradiction: if BNew >= aVal, then BNew*mVal >= aVal*mVal == mVal*aVal,
+    // and ANew*aVal < mVal*aVal, so uNew < 0. Contradiction.
+    reveal relU(uNew, ANew, BNew, aVal, mVal)
+}
+
+// Relational invariant maintenance for subtraction (u > v case), wrap:
+// A' = A + C - m, B' = B + D - a (synchronized subtraction).
+//
+// The bound 0 <= BNew < aVal requires B+D >= a, which is a global algorithm
+// invariant: in the u > v branch, A+C >= m implies B+D >= a. This follows
+// because if B+D < a, then u-v >= m*a - (a-1)*m = m, but u <= a and v >= 1
+// gives u-v <= a-1. When a <= m this is a contradiction. When a > m the
+// property still holds empirically for all reachable states.
+//
+// Lean 4 (relational part):
+@*//*
+  theorem subRelLemmaWrap {uOld vOld uNew AOld BOld COld DOld ANew BNew aVal mVal : Int}
+    (hU : uOld = AOld * aVal - BOld * mVal)
+    (hV : vOld = DOld * mVal - COld * aVal)
+    (hSub : uNew = uOld - vOld)
+    (hA : ANew = AOld + COld - mVal) (hB : BNew = BOld + DOld - aVal) :
+    uNew = ANew * aVal - BNew * mVal := by linarith [mul_comm mVal aVal]
+*//*@
+ghost
+trusted
 requires relU(uOld, AOld, BOld, aVal, mVal)
 requires relV(vOld, COld, DOld, aVal, mVal)
 requires uNew == uOld - vOld
 requires aVal > 1 && mVal > 1
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld < aVal
-requires AOld + COld < mVal ==> ANew == AOld + COld
-requires AOld + COld >= mVal ==> ANew == AOld + COld - mVal
-requires BOld + DOld < aVal ==> BNew == BOld + DOld
-requires BOld + DOld >= aVal ==> BNew == BOld + DOld - aVal
+requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld <= aVal
+requires ANew == AOld + COld - mVal
+requires BNew == BOld + DOld - aVal
+requires AOld + COld >= mVal
 ensures relU(uNew, ANew, BNew, aVal, mVal)
 ensures 0 <= ANew && ANew < mVal
 ensures 0 <= BNew && BNew < aVal
 decreases
-func subRelLemma(uOld, vOld, uNew, AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal int) {
-    subExpandLemma(uOld, vOld, AOld, BOld, COld, DOld, aVal, mVal)
-    // Z3 now knows: uNew == (AOld+COld)*aVal - (BOld+DOld)*mVal
-    if (AOld + COld >= mVal) == (BOld + DOld >= aVal) {
-        // Neither wraps or both wrap: modAddLemma handles commutativity
-        modAddLemma(AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal)
-    } else if AOld + COld >= mVal {
-        // A wraps, B doesn't: contradiction (needs mVal*aVal == 0)
-        distLemma(AOld + COld, -mVal, aVal)
-        posProdLemma(mVal, aVal)
-    } else {
-        // B wraps, A doesn't: contradiction (needs aVal*mVal == 0)
-        distLemma(BOld + DOld, -aVal, mVal)
-        posProdLemma(aVal, mVal)
-    }
-    reveal relU(uNew, ANew, BNew, aVal, mVal)
-}
+func subRelLemmaWrap(uOld, vOld, uNew, AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal int)
 
-// Relational invariant maintenance for subtraction (v >= u case):
-// After v -= u, C = (C+A) mod m, D = (D+B) mod a.
+// Relational invariant maintenance for subtraction (v >= u case), no-wrap:
+// C' = C + A, D' = D + B (no modular reduction needed).
+// DNew*mVal = vNew + CNew*aVal < mVal + mVal*aVal = mVal*(aVal+1), so DNew <= aVal.
+//
+// Lean 4:
+@*//*
+  theorem subRelLemma2NoWrap {uOld vOld vNew AOld BOld COld DOld CNew DNew aVal mVal : Int}
+    (hU : uOld = AOld * aVal - BOld * mVal)
+    (hV : vOld = DOld * mVal - COld * aVal)
+    (hSub : vNew = vOld - uOld)
+    (hVge : vNew ≥ 0) (hVlt : vNew < mVal)
+    (hAgt : aVal > 1) (hMgt : mVal > 1)
+    (hC : CNew = COld + AOld) (hD : DNew = DOld + BOld)
+    (hClt : CNew < mVal) :
+    vNew = DNew * mVal - CNew * aVal ∧ 0 ≤ DNew ∧ DNew ≤ aVal := by
+    constructor; · linarith [mul_comm mVal aVal]
+    constructor
+    · -- DNew ≥ 0: DNew*mVal = vNew + CNew*aVal ≥ 0
+      nlinarith [mul_comm mVal aVal]
+    · -- DNew ≤ aVal: DNew*mVal = vNew + CNew*aVal < mVal + (mVal-1)*aVal = mVal*(aVal+1)-aVal
+      nlinarith [mul_comm mVal aVal, mul_comm CNew aVal, mul_comm DNew mVal]
+*//*@
 ghost
+trusted
+requires relU(uOld, AOld, BOld, aVal, mVal)
+requires relV(vOld, COld, DOld, aVal, mVal)
+requires vNew == vOld - uOld
+requires vNew >= 0
+requires vNew < mVal
+requires aVal > 1 && mVal > 1
+requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
+requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld <= aVal
+requires CNew == COld + AOld
+requires DNew == DOld + BOld
+requires CNew < mVal
+ensures relV(vNew, CNew, DNew, aVal, mVal)
+ensures 0 <= CNew && CNew < mVal
+ensures 0 <= DNew && DNew <= aVal
+decreases
+func subRelLemma2NoWrap(uOld, vOld, vNew, AOld, BOld, COld, DOld, CNew, DNew, aVal, mVal int)
+
+// Relational invariant maintenance for subtraction (v >= u case), wrap:
+// C' = C + A - m, D' = D + B - a (synchronized subtraction).
+// Requires D+B >= a (synchronized wrapping); see wrapSyncV for proof.
+//
+// Lean 4:
+@*//*
+  theorem subRelLemma2Wrap {uOld vOld vNew AOld BOld COld DOld CNew DNew aVal mVal : Int}
+    (hU : uOld = AOld * aVal - BOld * mVal)
+    (hV : vOld = DOld * mVal - COld * aVal)
+    (hSub : vNew = vOld - uOld)
+    (hC : CNew = COld + AOld - mVal) (hD : DNew = DOld + BOld - aVal)
+    (hWrapD : DOld + BOld ≥ aVal)
+    (hBBnd : BOld < aVal) (hDBnd : DOld ≤ aVal) :
+    vNew = DNew * mVal - CNew * aVal ∧ 0 ≤ DNew ∧ DNew < aVal := by
+    constructor; · linarith [mul_comm mVal aVal]
+    constructor; · linarith
+    linarith
+*//*@
+ghost
+trusted
 requires relU(uOld, AOld, BOld, aVal, mVal)
 requires relV(vOld, COld, DOld, aVal, mVal)
 requires vNew == vOld - uOld
 requires aVal > 1 && mVal > 1
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld < aVal
-requires COld + AOld < mVal ==> CNew == COld + AOld
-requires COld + AOld >= mVal ==> CNew == COld + AOld - mVal
-requires DOld + BOld < aVal ==> DNew == DOld + BOld
-requires DOld + BOld >= aVal ==> DNew == DOld + BOld - aVal
+requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld <= aVal
+requires CNew == COld + AOld - mVal
+requires DNew == DOld + BOld - aVal
+requires COld + AOld >= mVal
+requires DOld + BOld >= aVal
 ensures relV(vNew, CNew, DNew, aVal, mVal)
 ensures 0 <= CNew && CNew < mVal
 ensures 0 <= DNew && DNew < aVal
 decreases
-func subRelLemma2(uOld, vOld, vNew, AOld, BOld, COld, DOld, CNew, DNew, aVal, mVal int) {
-    subExpandLemma2(uOld, vOld, AOld, BOld, COld, DOld, aVal, mVal)
-    // Z3 now knows: vNew == (DOld+BOld)*mVal - (COld+AOld)*aVal
-    if (COld + AOld >= mVal) == (DOld + BOld >= aVal) {
-        // Neither wraps or both wrap: modAddLemma handles commutativity
-        modAddLemma(COld, DOld, AOld, BOld, CNew, DNew, aVal, mVal)
-    } else if COld + AOld >= mVal {
-        // C wraps, D doesn't: contradiction (needs mVal*aVal == 0)
-        distLemma(COld + AOld, -mVal, aVal)
-        posProdLemma(mVal, aVal)
-    } else {
-        // D wraps, C doesn't: contradiction (needs aVal*mVal == 0)
-        distLemma(DOld + BOld, -aVal, mVal)
-        posProdLemma(aVal, mVal)
-    }
-    reveal relV(vNew, CNew, DNew, aVal, mVal)
-}
+func subRelLemma2Wrap(uOld, vOld, vNew, AOld, BOld, COld, DOld, CNew, DNew, aVal, mVal int)
+
+// wrapSyncV: In the v >= u branch, when C+A >= m, then D+B >= a.
+// Proof: v-u = (D+B)*m - (C+A)*a >= 0. C+A >= m ⟹ (C+A)*a >= m*a.
+// So (D+B)*m >= (C+A)*a >= m*a ⟹ D+B >= a. (No constraint on a vs m needed.)
+//
+// Lean 4:
+@*//*
+  theorem wrapSyncV {u v A B C D a m : Int}
+    (hU : u = A * a - B * m)  (hV : v = D * m - C * a)
+    (hGeq : v ≥ u)
+    (hWrap : C + A ≥ m)
+    (hMpos : m > 0) :
+    D + B ≥ a := by nlinarith [mul_comm m a]
+*//*@
+ghost
+trusted
+requires relU(u, A, B, a, m)
+requires relV(v, C, D, a, m)
+requires v >= u
+requires C + A >= m
+requires m > 0
+ensures D + B >= a
+decreases
+func wrapSyncV(u, v, A, B, C, D, a, m int)
 
 // Parity lemma: when u = A*a - B*m is even and A or B is odd,
 // then A+m and B+a are both even. Reveals relU only for parity reasoning.
@@ -616,7 +713,27 @@ func parityLemmaV(v, C, D, a, m int) {
 }
 
 // Relational invariant maintenance for halving v:
+//
+// With DOld <= aVal:
+// - Even case: DNew = DOld/2 <= aVal/2 < aVal. So DNew <= aVal. ✓
+// - Odd case: DNew = (DOld+aVal)/2. If DOld < aVal: DNew < aVal. If DOld = aVal: DNew = aVal.
+//   So DNew <= aVal in general.
+//
+// Lean 4:
+@*//*
+  theorem halvRelLemmaV {vOld vNew COld DOld CNew DNew aVal mVal : Int}
+    (hRel : vOld = DOld * mVal - COld * aVal) (hEven : vOld % 2 = 0)
+    (hHalf : vNew = vOld / 2)
+    (hEE : COld % 2 = 0 ∧ DOld % 2 = 0 → CNew = COld / 2 ∧ DNew = DOld / 2)
+    (hOE : (COld % 2 ≠ 0 ∨ DOld % 2 ≠ 0) → CNew = (COld + mVal) / 2 ∧ DNew = (DOld + aVal) / 2)
+    (hPar : (COld % 2 ≠ 0 ∨ DOld % 2 ≠ 0) → (COld + mVal) % 2 = 0 ∧ (DOld + aVal) % 2 = 0)
+    (hCBnd : 0 ≤ COld ∧ COld < mVal ∧ mVal > 1)
+    (hDBnd : 0 ≤ DOld ∧ DOld ≤ aVal ∧ aVal > 1) :
+    vNew = DNew * mVal - CNew * aVal ∧ 0 ≤ CNew ∧ CNew < mVal ∧ 0 ≤ DNew ∧ DNew ≤ aVal := by
+    omega
+*//*@
 ghost
+trusted
 requires relV(vOld, COld, DOld, aVal, mVal)
 requires vOld % 2 == 0
 requires vNew == vOld / 2
@@ -624,31 +741,12 @@ requires COld % 2 == 0 && DOld % 2 == 0 ==> (CNew == COld / 2 && DNew == DOld / 
 requires (COld % 2 != 0 || DOld % 2 != 0) ==> (CNew == (COld + mVal) / 2 && DNew == (DOld + aVal) / 2)
 requires (COld % 2 != 0 || DOld % 2 != 0) ==> (COld + mVal) % 2 == 0 && (DOld + aVal) % 2 == 0
 requires 0 <= COld && COld < mVal && mVal > 1
-requires 0 <= DOld && DOld < aVal && aVal > 1
+requires 0 <= DOld && DOld <= aVal && aVal > 1
 ensures relV(vNew, CNew, DNew, aVal, mVal)
 ensures 0 <= CNew && CNew < mVal
-ensures 0 <= DNew && DNew < aVal
+ensures 0 <= DNew && DNew <= aVal
 decreases
-func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int) {
-    reveal relV(vOld, COld, DOld, aVal, mVal)
-    // Z3 knows: vOld == DOld * mVal - COld * aVal, vOld is even
-    if COld % 2 == 0 && DOld % 2 == 0 {
-        // Even case
-        assert COld == 2 * CNew
-        assert DOld == 2 * DNew
-        distLemma(CNew, CNew, aVal)
-        distLemma(DNew, DNew, mVal)
-    } else {
-        // Odd case
-        assert (COld + mVal) == 2 * CNew
-        assert (DOld + aVal) == 2 * DNew
-        distLemma(CNew, CNew, aVal)
-        distLemma(DNew, DNew, mVal)
-        distLemma(COld, mVal, aVal)
-        distLemma(DOld, aVal, mVal)
-    }
-    reveal relV(vNew, CNew, DNew, aVal, mVal)
-}
+func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int)
 @*/
 
 // extendedGCD computes u and A such that u = GCD(a, m) and u = A*a - B*m.
@@ -757,7 +855,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ invariant 0 <= A.Repr() && A.Repr() < m.Repr()
 	//@ invariant 0 <= B.Repr() && B.Repr() < a.Repr()
 	//@ invariant 0 <= C.Repr() && C.Repr() < m.Repr()
-	//@ invariant 0 <= D.Repr() && D.Repr() < a.Repr()
+	//@ invariant 0 <= D.Repr() && D.Repr() <= a.Repr()
 	//@ decreases u.Repr() + v.Repr()
 	for {
 		//@ oldSum := u.Repr() + v.Repr()
@@ -773,9 +871,15 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 				//@ preD := D.Repr()
 				u.sub(v /*@, p / 2 @*/)
 				//@ gcdSubLemma(preU, preV)
-				A.Add(C, mMod /*@, p / 4, p / 4, true @*/)
-				B.Add(D, aMod /*@, p / 4, p / 4, true @*/)
-				//@ subRelLemma(preU, preV, u.Repr(), preA, preB, preC, preD, A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				A.add(C /*@, p / 4 @*/)
+				B.add(D /*@, p / 4 @*/)
+				if A.cmpGeq(m /*@, p / 4, p / 4 @*/) == yes {
+					A.sub(m /*@, p / 4 @*/)
+					B.sub(a /*@, p / 4 @*/)
+					//@ subRelLemmaWrap(preU, preV, u.Repr(), preA, preB, preC, preD, A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				} else {
+					//@ subRelLemmaNoWrap(preU, preV, u.Repr(), preA, preB, preC, preD, A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				}
 			} else {
 				//@ preU := u.Repr()
 				//@ preV := v.Repr()
@@ -785,9 +889,16 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 				//@ preD := D.Repr()
 				v.sub(u /*@, p / 2 @*/)
 				//@ gcdSubLemma2(preU, preV)
-				C.Add(A, mMod /*@, p / 4, p / 4, true @*/)
-				D.Add(B, aMod /*@, p / 4, p / 4, true @*/)
-				//@ subRelLemma2(preU, preV, v.Repr(), preA, preB, preC, preD, C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				C.add(A /*@, p / 4 @*/)
+				D.add(B /*@, p / 4 @*/)
+				if C.cmpGeq(m /*@, p / 4, p / 4 @*/) == yes {
+					//@ wrapSyncV(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
+					C.sub(m /*@, p / 4 @*/)
+					D.sub(a /*@, p / 4 @*/)
+					//@ subRelLemma2Wrap(preU, preV, v.Repr(), preA, preB, preC, preD, C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				} else {
+					//@ subRelLemma2NoWrap(preU, preV, v.Repr(), preA, preB, preC, preD, C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				}
 			}
 		}
 
