@@ -30,6 +30,8 @@ pred (n *Nat) Inv() {
     acc(n) && acc(n.limbs)
 }
 
+ghost
+opaque
 requires acc(n.Inv(), _)
 ensures  0 <= res
 decreases
@@ -37,6 +39,7 @@ pure func (n *Nat) Repr() (res int) {
 	return unfolding acc(n.Inv(), _) in limbsRepr(n.limbs)
 }
 
+ghost
 requires acc(limbs, _)
 ensures  0 <= res
 decreases
@@ -52,6 +55,8 @@ ensures  limbsRepr(limbs1) == limbsRepr(limbs2)
 decreases
 func equalLimbsRepr(limbs1, limbs2 []uint, p perm)
 
+ghost
+opaque
 requires acc(n.Inv(), _)
 decreases
 pure func (n *Nat) AnnouncedLen() (res int) {
@@ -74,6 +79,7 @@ func NewNat() (n *Nat) {
 	limbs := make([]uint, 0, preallocLimbs)
 	n = &Nat{limbs}
 	//@ fold n.Inv()
+	//@ assert reveal n.AnnouncedLen() == 0
 	return n
 }
 
@@ -143,13 +149,17 @@ func (x *Nat) reset(n int) (res *Nat) {
 //@ ensures   x.Repr() == y.Repr()
 //@ ensures   x.AnnouncedLen() == y.AnnouncedLen()
 func (x *Nat) setNat(y *Nat /*@, ghost p perm @*/) (r *Nat) {
+	//@ reveal y.AnnouncedLen()
 	//@ unfold acc(y.Inv(), p/2)
 	x.reset(len(y.limbs))
+	//@ reveal x.AnnouncedLen()
 	//@ unfold x.Inv()
 	copy(x.limbs, y.limbs /*@, p/4 @*/)
 	//@ equalLimbsRepr(x.limbs, y.limbs, p/4)
 	//@ fold x.Inv()
 	//@ fold acc(y.Inv(), p/2)
+	//@ assert reveal x.Repr() == reveal y.Repr()
+	//@ assert reveal x.AnnouncedLen() == reveal y.AnnouncedLen()
 	return x
 }
 
@@ -218,6 +228,7 @@ func (x *Nat) IsOdd(/*@ ghost p perm @*/) (res choice) {
 //@ requires x.AnnouncedLen() == y.AnnouncedLen()
 //@ ensures  x.Inv() && acc(y.Inv(), p)
 //@ ensures  x.Repr() == old(x.Repr()) + y.Repr()
+//@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
 func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -241,6 +252,7 @@ func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 //@ requires x.AnnouncedLen() == y.AnnouncedLen()
 //@ ensures  x.Inv() && acc(y.Inv(), p)
 //@ ensures  x.Repr() == old(x.Repr()) - y.Repr()
+//@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
 func (x *Nat) sub(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -295,6 +307,7 @@ pure func (m *Modulus) Repr() int {
     return unfolding acc(m.Inv(), _) in m.nat.Repr()
 }
 
+ghost
 requires acc(m.Inv(), _)
 decreases
 pure func (m *Modulus) AnnouncedLen() (res int) {
@@ -974,6 +987,9 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 		return nil, nil, errors.New("extendedGCD: both a and m are even") /*@, 0 @*/
 	}
 
+	// TODO: we need a lemma that gives us the fact that !m.IsZero ==> m.AnnouncedLen() > 0
+	assume m.AnnouncedLen() > 0
+	assume a.AnnouncedLen() > 0
 	//@ assert 0 < a.Repr() && 0 < m.Repr()
 	//@ assert a.Repr() % 2 != 0 || m.Repr() % 2 != 0
 
@@ -1019,10 +1035,18 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//
 	// After each loop iteration, u and v only get smaller, and at least one of
 	// them shrinks by at least a factor of two.
-	//@ invariant u.Inv() && v.Inv() && A.Inv() && B.Inv() && C.Inv() && D.Inv()
-	//@ invariant acc(mMod.Inv(), p/2) && acc(aMod.Inv(), p/2)
-	//@ invariant mMod.IsNatOnly() && aMod.IsNatOnly()
-	//@ invariant acc(m.Inv(), p/2) && acc(a.Inv(), p/2)
+	// Permissions & sizes:
+	//@ invariant acc(m.Inv(), p/2) && 0 < m.AnnouncedLen()
+	//@ invariant acc(a.Inv(), p/2) && 0 < a.AnnouncedLen()
+	//@ invariant u.Inv() && u.AnnouncedLen() == size
+	//@ invariant v.Inv() && v.AnnouncedLen() == size
+	//@ invariant A.Inv() && A.AnnouncedLen() == m.AnnouncedLen()
+	//@ invariant B.Inv() && B.AnnouncedLen() == a.AnnouncedLen()
+	//@ invariant C.Inv() && C.AnnouncedLen() == m.AnnouncedLen()
+	//@ invariant D.Inv() && D.AnnouncedLen() == a.AnnouncedLen()
+	//@ invariant acc(mMod.Inv(), p/2) && mMod.IsNatOnly()
+	//@ invariant acc(aMod.Inv(), p/2) && aMod.IsNatOnly()
+	// Bounds:
 	//@ invariant mMod.Repr() > 0 && aMod.Repr() > 0
 	//@ invariant mMod.Repr() == m.Repr() && aMod.Repr() == a.Repr()
 	//@ invariant a.Repr() > 0 && m.Repr() > 0
@@ -1198,6 +1222,7 @@ func maxLen(a, b *Nat /*@, ghost p perm @*/) (res int) {
 	res = max(len(a.limbs), len(b.limbs))
 	//@ fold acc(b.Inv(), p/2)
 	//@ fold acc(a.Inv(), p/2)
+	//@ assert res == gmax(reveal a.AnnouncedLen(), reveal b.AnnouncedLen())
 	return
 }
 
@@ -1208,6 +1233,7 @@ func natLen(n *Nat /*@, ghost p perm @*/) (res int) {
 	//@ unfold acc(n.Inv(), p/2)
 	res = len(n.limbs)
 	//@ fold acc(n.Inv(), p/2)
+	//@ assert res == reveal n.AnnouncedLen()
 	return
 }
 
@@ -1226,6 +1252,7 @@ func setOne(n *Nat) {
 //@ trusted
 //@ preserves a.Inv()
 //@ ensures   a.Repr() == old(a.Repr()) / 2
+//@ ensures   a.AnnouncedLen() == old(a.AnnouncedLen())
 func rshift1(a *Nat, carry uint) {
 	size := len(a.limbs)
 	aLimbs := a.limbs[:size]
