@@ -1038,6 +1038,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	// Permissions & sizes:
 	//@ invariant acc(m.Inv(), p/2) && 0 < m.AnnouncedLen()
 	//@ invariant acc(a.Inv(), p/2) && 0 < a.AnnouncedLen()
+	//@ invariant size == gmax(a.AnnouncedLen(), m.AnnouncedLen())
 	//@ invariant u.Inv() && u.AnnouncedLen() == size
 	//@ invariant v.Inv() && v.AnnouncedLen() == size
 	//@ invariant A.Inv() && A.AnnouncedLen() == m.AnnouncedLen()
