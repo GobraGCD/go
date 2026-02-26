@@ -1,6 +1,16 @@
 package bigmod
 
-import "errors"
+import (
+	"errors"
+	"math/bits"
+)
+
+const (
+	// _W is the size in bits of our limbs.
+	_W = bits.UintSize
+	// _S is the size in bytes of our limbs.
+	_S = _W / 8
+)
 
 // choice represents a constant-time boolean. The value of choice is always
 // either 1 or 0. We use an int instead of bool in order to make decisions in
@@ -21,25 +31,57 @@ pred (n *Nat) Inv() {
 }
 
 requires acc(n.Inv(), _)
-ensures res >= 0
+ensures  0 <= res
 decreases
-pure func (n *Nat) Repr() (res int)
+pure func (n *Nat) Repr() (res int) {
+	return unfolding acc(n.Inv(), _) in limbsRepr(n.limbs)
+}
+
+requires acc(limbs, _)
+ensures  0 <= res
+decreases
+pure func limbsRepr(limbs []uint) (res int)
+
+ghost
+requires noPerm < p
+requires acc(limbs1, p) && acc(limbs2, p)
+requires len(limbs1) == len(limbs2)
+requires forall j int :: { limbs1[j], limbs2[j] } 0 <= j && j < len(limbs1) ==> limbs1[j] == limbs2[j]
+ensures  acc(limbs1, p) && acc(limbs2, p)
+ensures  limbsRepr(limbs1) == limbsRepr(limbs2)
+decreases
+func equalLimbsRepr(limbs1, limbs2 []uint, p perm)
+
+requires acc(n.Inv(), _)
+decreases
+pure func (n *Nat) AnnouncedLen() (res int) {
+	return unfolding acc(n.Inv(), _) in len(n.limbs)
+}
 @*/
+
+// preallocTarget is the size in bits of the numbers used to implement the most
+// common and most performant RSA key size. It's also enough to cover some of
+// the operations of key sizes up to 4096.
+const preallocTarget = 2048
+const preallocLimbs = (preallocTarget + _W - 1) / _W
 
 // NewNat returns a new nat with a size of zero, just like new(Nat), but with
 // the preallocated capacity to hold a number of up to preallocTarget bits.
 // NewNat inlines, so the allocation can live on the stack.
-//@ trusted
 //@ ensures n.Inv()
+//@ ensures n.AnnouncedLen() == 0
 func NewNat() (n *Nat) {
 	limbs := make([]uint, 0, preallocLimbs)
-	return &Nat{limbs}
+	n = &Nat{limbs}
+	//@ fold n.Inv()
+	return n
 }
 
 // expand expands x to n limbs, leaving its value unchanged.
 //@ trusted
 //@ preserves x.Inv()
-//@ ensures x.Repr() == old(x.Repr())
+//@ ensures   x.AnnouncedLen() == n
+//@ ensures   x.Repr() == old(x.Repr())
 func (x *Nat) expand(n int) *Nat {
 	if len(x.limbs) > n {
 		panic("bigmod: internal error: shrinking nat")
@@ -56,11 +98,33 @@ func (x *Nat) expand(n int) *Nat {
 	return x
 }
 
+/*@
+// Gobra doesn't have `clear` yet
+preserves limbs != nil ==> acc(limbs)
+ensures   limbs != nil ==> forall j int :: { limbs[j] } 0 <= j && j < len(limbs) ==> limbs[j] == 0
+decreases
+func clear(limbs []uint) {
+	if limbs == nil {
+		return // clear is noop if limbs is nil
+	}
+
+	invariant 0 <= i && i <= len(limbs)
+	invariant acc(limbs)
+	invariant forall j int :: { limbs[j] } 0 <= j && j < i ==> limbs[j] == 0
+	decreases len(limbs) - i
+	for i := 0; i < len(limbs); i++ {
+		limbs[i] = 0
+	}
+	return
+}
+@*/
+
 // reset returns a zero nat of n limbs, reusing x's storage if n <= cap(x.limbs).
 //@ trusted
-//@ requires x.Inv()
-//@ ensures  res.Inv()
-//@ ensures  res.Repr() == 0
+//@ preserves x.Inv()
+//@ ensures   x == res
+//@ ensures   x.Repr() == 0
+//@ ensures   x.AnnouncedLen() == n
 func (x *Nat) reset(n int) (res *Nat) {
 	if cap(x.limbs) < n {
 		x.limbs = make([]uint, n)
@@ -71,14 +135,21 @@ func (x *Nat) reset(n int) (res *Nat) {
 	return x
 }
 
+// "set" is unfortunately a keyword in Gobra so we use "setNat" instead.
 // set assigns x = y, optionally resizing x to the appropriate size.
-//@ trusted
-//@ requires noPerm < p
+//@ requires  noPerm < p
 //@ preserves x.Inv() && acc(y.Inv(), p)
-//@ ensures x.Repr() == y.Repr()
-func (x *Nat) setNat(y *Nat /*@, ghost p perm @*/) *Nat {
+//@ ensures   r == x
+//@ ensures   x.Repr() == y.Repr()
+//@ ensures   x.AnnouncedLen() == y.AnnouncedLen()
+func (x *Nat) setNat(y *Nat /*@, ghost p perm @*/) (r *Nat) {
+	//@ unfold acc(y.Inv(), p/2)
 	x.reset(len(y.limbs))
-	copy(x.limbs, y.limbs)
+	//@ unfold x.Inv()
+	copy(x.limbs, y.limbs /*@, p/4 @*/)
+	//@ equalLimbsRepr(x.limbs, y.limbs, p/4)
+	//@ fold x.Inv()
+	//@ fold acc(y.Inv(), p/2)
 	return x
 }
 
@@ -86,9 +157,9 @@ func (x *Nat) setNat(y *Nat /*@, ghost p perm @*/) *Nat {
 //
 //go:norace
 //@ trusted
-//@ requires noPerm < p
+//@ requires  noPerm < p
 //@ preserves acc(x.Inv(), p)
-//@ ensures res == (x.Repr() == 0 ? yes : no)
+//@ ensures   res == (x.Repr() == 0 ? yes : no)
 func (x *Nat) IsZero(/*@ ghost p perm @*/) (res choice) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -101,11 +172,34 @@ func (x *Nat) IsZero(/*@ ghost p perm @*/) (res choice) {
 	return zero
 }
 
+// IsOne returns 1 if x == 1, and 0 otherwise.
+//
+//go:norace
+//@ trusted
+//@ requires  noPerm < p
+//@ preserves acc(x.Inv(), p)
+//@ ensures   res == (x.Repr() == 1 ? yes : no)
+func (x *Nat) IsOne(/*@ ghost p perm @*/) (res choice) {
+	// Eliminate bounds checks in the loop.
+	size := len(x.limbs)
+	xLimbs := x.limbs[:size]
+
+	if len(xLimbs) == 0 {
+		return no
+	}
+
+	one := ctEq(xLimbs[0], 1)
+	for i := 1; i < size; i++ {
+		one &= ctEq(xLimbs[i], 0)
+	}
+	return one
+}
+
 // IsOdd returns 1 if x is odd, and 0 otherwise.
 //@ trusted
-//@ requires noPerm < p
+//@ requires  noPerm < p
 //@ preserves acc(x.Inv(), p)
-//@ ensures res == (x.Repr() % 2 == 1 ? yes : no)
+//@ ensures   res == (x.Repr() % 2 == 1 ? yes : no)
 func (x *Nat) IsOdd(/*@ ghost p perm @*/) (res choice) {
 	if len(x.limbs) == 0 {
 		return no
@@ -120,8 +214,10 @@ func (x *Nat) IsOdd(/*@ ghost p perm @*/) (res choice) {
 //go:norace
 //@ trusted
 //@ requires noPerm < p
-//@ preserves x.Inv() && acc(y.Inv(), p)
-//@ ensures x.Repr() == old(x.Repr()) + y.Repr()
+//@ requires x.Inv() && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ ensures  x.Inv() && acc(y.Inv(), p)
+//@ ensures  x.Repr() == old(x.Repr()) + y.Repr()
 func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -141,8 +237,10 @@ func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 //go:norace
 //@ trusted
 //@ requires noPerm < p
-//@ preserves x.Inv() && acc(y.Inv(), p)
-//@ ensures x.Repr() == old(x.Repr()) - y.Repr()
+//@ requires x.Inv() && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ ensures  x.Inv() && acc(y.Inv(), p)
+//@ ensures  x.Repr() == old(x.Repr()) - y.Repr()
 func (x *Nat) sub(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -170,22 +268,37 @@ type Modulus struct {
 	odd   bool
 	m0inv uint // -nat.limbs[0]⁻¹ mod _W
 	rr    *Nat // R*R for montgomeryRepresentation
+
+	//@ ghost natOnly bool
 }
 
 /*@
 // it turns out that several functions operating on Modulus are happy if only the `nat` field is correct,
-// which we capture via the `natOnly` parameter.
-pred (m *Modulus) Inv(ghost natOnly bool) {
+// which we capture via the `natOnly` ghost field.
+pred (m *Modulus) Inv() {
     acc(m) && m.nat.Inv() &&
-    (!natOnly ==> m.odd == (m.nat.Repr() % 2 == 1)) &&
-    (!natOnly && m.odd ==> m.rr.Inv())
+    (!m.natOnly ==> m.odd == (m.nat.Repr() % 2 == 1)) &&
+    (!m.natOnly && m.odd ==> m.rr.Inv())
 }
 
 ghost
-requires acc(m.Inv(natOnly), _)
+requires acc(m.Inv(), _)
 decreases
-pure func (m *Modulus) Repr(natOnly bool) int {
-    return unfolding acc(m.Inv(natOnly), _) in m.nat.Repr()
+pure func (m *Modulus) IsNatOnly() bool {
+	return unfolding acc(m.Inv(), _) in m.natOnly
+}
+
+ghost
+requires acc(m.Inv(), _)
+decreases
+pure func (m *Modulus) Repr() int {
+    return unfolding acc(m.Inv(), _) in m.nat.Repr()
+}
+
+requires acc(m.Inv(), _)
+decreases
+pure func (m *Modulus) AnnouncedLen() (res int) {
+	return unfolding acc(m.Inv(), _) in m.nat.AnnouncedLen()
 }
 @*/
 
@@ -197,15 +310,16 @@ pure func (m *Modulus) Repr(natOnly bool) int {
 //go:norace
 //@ trusted
 //@ requires noPerm < p && noPerm < q
-//@ requires x.Inv() && acc(y.Inv(), p) && acc(m.Inv(natOnly), q)
-//@ requires m.Repr(natOnly) > 0
-//@ requires 0 <= x.Repr() && x.Repr() < m.Repr(natOnly)
-//@ requires 0 <= y.Repr() && y.Repr() < m.Repr(natOnly)
-//@ ensures x.Inv() && acc(y.Inv(), p) && acc(m.Inv(natOnly), q)
-//@ ensures 0 <= x.Repr() && x.Repr() < m.Repr(natOnly)
-//@ ensures old(x.Repr()) + y.Repr() < m.Repr(natOnly) ==> x.Repr() == old(x.Repr()) + y.Repr()
-//@ ensures old(x.Repr()) + y.Repr() >= m.Repr(natOnly) ==> x.Repr() == old(x.Repr()) + y.Repr() - m.Repr(natOnly)
-func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p, q perm, ghost natOnly bool @*/) *Nat {
+//@ requires x.Inv() && acc(y.Inv(), p) && acc(m.Inv(), q)
+//@ requires x.AnnouncedLen() == m.AnnouncedLen() && y.AnnouncedLen() == m.AnnouncedLen()
+//@ requires m.Repr() > 0 // TODO: do we need this precondition?
+//@ requires 0 <= x.Repr() && x.Repr() < m.Repr()
+//@ requires 0 <= y.Repr() && y.Repr() < m.Repr()
+//@ ensures  x.Inv() && acc(y.Inv(), p) && acc(m.Inv(), q)
+//@ ensures  0 <= x.Repr() && x.Repr() < m.Repr()
+//@ ensures  old(x.Repr()) + y.Repr() < m.Repr() ==> x.Repr() == old(x.Repr()) + y.Repr()
+//@ ensures  old(x.Repr()) + y.Repr() >= m.Repr() ==> x.Repr() == old(x.Repr()) + y.Repr() - m.Repr()
+func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p, q perm @*/) *Nat {
 	overflow := x.add(y)
 	x.maybeSubtractModulus(choice(overflow), m)
 	return x
@@ -214,7 +328,7 @@ func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p, q perm, ghost natOnly bool @*
 /*@
 ghost
 opaque
-requires a >= 0 && m >= 0
+requires  0 <= a && 0 <= m
 decreases m
 pure func gcd(a, m int) int {
     return m == 0 ? a : gcd(m, a % m)
@@ -222,8 +336,8 @@ pure func gcd(a, m int) int {
 
 // gcd(a, 0) == a (base case, requires revealing the definition)
 ghost
-requires a >= 0
-ensures gcd(a, 0) == a
+requires 0 <= a
+ensures  gcd(a, 0) == a
 decreases
 func gcdBaseLemma(a int) {
     reveal gcd(a, 0)
@@ -232,7 +346,7 @@ func gcdBaseLemma(a int) {
 // gcd(a, b) == gcd(a - b, b) when a > b > 0
 ghost
 requires 0 < b && b < a
-ensures gcd(a, b) == gcd(a - b, b)
+ensures  gcd(a, b) == gcd(a - b, b)
 decreases
 func gcdSubLemma(a, b int) {
     reveal gcd(a, b)       // gcd(a, b) == gcd(b, a % b)
@@ -762,6 +876,58 @@ decreases
 func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int)
 @*/
 
+// InverseVarTime calculates x = a⁻¹ mod m and returns (x, true) if a is
+// invertible. Otherwise, InverseVarTime returns (x, false) and x is not
+// modified.
+//
+// a must be reduced modulo m, but doesn't need to have the same size. The
+// output will be resized to the size of m and overwritten.
+//
+//go:norace
+//@ requires noPerm < p && p <= writePerm
+//@ requires x.Inv() && acc(a.Inv(), p) && acc(m.Inv(), p)
+//@ requires a.Repr() < m.Repr() // a must be reduced modulo m
+//@ ensures  x.Inv() && acc(a.Inv(), p) && acc(m.Inv(), p)
+//@ ensures  r == x
+//@ ensures  ok ==> gcd(a.Repr(), m.Repr()) == x.Repr() * a.Repr() - BRepr * m.Repr()
+//@ ensures  ok ==> x.AnnouncedLen() == m.AnnouncedLen()
+//@ ensures !ok ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
+func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, ok bool /*@, ghost BRepr int @*/) {
+	//@ unfold acc(m.Inv(), p/2)
+	u, A, err /*@, BRepr @*/ := extendedGCD(a, m.nat /*@, p/4 @*/)
+	//@ fold acc(m.Inv(), p/2)
+	if err != nil {
+		return x, false /*@, BRepr @*/
+	}
+	if u.IsOne(/*@ p/2 @*/) == no {
+		return x, false /*@, BRepr @*/
+	}
+	return x.setNat(A /*@, 1/2 @*/), true /*@, BRepr @*/
+}
+
+// GCDVarTime calculates x = GCD(a, b) where at least one of a or b is odd, and
+// both are non-zero. If GCDVarTime returns an error, x is not modified.
+//
+// The output will be resized to the size of the larger of a and b.
+//@ requires noPerm < p && p <= writePerm
+//@ requires x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
+//@ requires a.Repr() % 2 == 1 || b.Repr() % 2 == 1 // at least one of a or b is odd
+//@ requires a.Repr() != 0 && b.Repr() != 0 // both a and b are non-zero
+//@ ensures  x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
+//@ ensures  err == nil ==> r == x
+//@ ensures  err == nil ==> x.Repr() == gcd(a.Repr(), b.Repr())
+//@ ensures  err != nil ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
+func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
+	// bug: we cannot simply invoke `extendedGCD` due to its
+	// preconditions!
+	// TODO: if a.Equal(b) == yes
+	u, _, err /*@, BRepr @*/ := extendedGCD(a, b /*@, p @*/)
+	if err != nil {
+		return nil, err
+	}
+	return x.setNat(u /*@, 1/2 @*/), nil
+}
+
 // extendedGCD computes u and A such that u = GCD(a, m) and u = A*a - B*m.
 //
 // u will have the size of the larger of a and m, and A will have the size of m.
@@ -770,10 +936,12 @@ func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int)
 //@ requires noPerm < p && p <= writePerm
 //@ requires acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ requires a.Repr() < m.Repr() // TODO move this into the function
-//@ ensures acc(a.Inv(), p) && acc(m.Inv(), p)
-//@ ensures err == nil ==> u.Inv() && A.Inv()
-//@ ensures err == nil ==> u.Repr() == gcd(a.Repr(), m.Repr())
-//@ ensures err == nil ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
+//@ ensures  acc(a.Inv(), p) && acc(m.Inv(), p)
+//@ ensures  err == nil ==> u.Inv() && A.Inv()
+//@ ensures  err == nil ==> u.Repr() == gcd(a.Repr(), m.Repr())
+//@ ensures  err == nil ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
+//@ ensures  err == nil ==> u.AnnouncedLen() == gmax(a.AnnouncedLen(), m.AnnouncedLen())
+//@ ensures  err == nil ==> A.AnnouncedLen() == m.AnnouncedLen()
 func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr int @*/) {
 	// This is the extended binary GCD algorithm described in the Handbook of
 	// Applied Cryptography, Algorithm 14.61, adapted by BoringSSL to bound
@@ -809,7 +977,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ assert 0 < a.Repr() && 0 < m.Repr()
 	//@ assert a.Repr() % 2 != 0 || m.Repr() % 2 != 0
 
-	size := maxLen(a, m /*@, p / 2, p / 2 @*/)
+	size := maxLen(a, m /*@, p / 2 @*/)
 	u = NewNat()
 	u.setNat(a /*@, p / 2 @*/)
 	u.expand(size)
@@ -825,11 +993,12 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	setOne(D)
 
 	// Construct Modulus wrappers for modular addition of coefficients.
-	// Only nat is set (natOnly=true) since Add only uses the nat field.
 	mMod := &Modulus{nat: m}
-	//@ fold acc(mMod.Inv(true), p/2)
+	//@ mMod.natOnly = true
+	//@ fold acc(mMod.Inv(), p/2)
 	aMod := &Modulus{nat: a}
-	//@ fold acc(aMod.Inv(true), p/2)
+	//@ aMod.natOnly = true
+	//@ fold acc(aMod.Inv(), p/2)
 
 	// Establish relational invariants:
 	// u = a = 1*a - 0*m, so relU(a, 1, 0, a, m) holds.
@@ -851,10 +1020,11 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	// After each loop iteration, u and v only get smaller, and at least one of
 	// them shrinks by at least a factor of two.
 	//@ invariant u.Inv() && v.Inv() && A.Inv() && B.Inv() && C.Inv() && D.Inv()
-	//@ invariant acc(mMod.Inv(true), p/2) && acc(aMod.Inv(true), p/2)
+	//@ invariant acc(mMod.Inv(), p/2) && acc(aMod.Inv(), p/2)
+	//@ invariant mMod.IsNatOnly() && aMod.IsNatOnly()
 	//@ invariant acc(m.Inv(), p/2) && acc(a.Inv(), p/2)
-	//@ invariant mMod.Repr(true) > 0 && aMod.Repr(true) > 0
-	//@ invariant mMod.Repr(true) == m.Repr() && aMod.Repr(true) == a.Repr()
+	//@ invariant mMod.Repr() > 0 && aMod.Repr() > 0
+	//@ invariant mMod.Repr() == m.Repr() && aMod.Repr() == a.Repr()
 	//@ invariant a.Repr() > 0 && m.Repr() > 0
 	//@ invariant a.Repr() < m.Repr()
 	//@ invariant a.Repr() % 2 == 1 || m.Repr() % 2 == 1
@@ -877,7 +1047,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 		// If both u and v are odd, subtract the smaller from the larger.
 		// If u = v, we need to subtract from v to hit the modified exit condition.
 		if u.IsOdd(/*@ p / 2 @*/) == yes && v.IsOdd(/*@ p / 2 @*/) == yes {
-			if v.cmpGeq(u /*@, p / 4, p / 4 @*/) == no {
+			if v.cmpGeq(u /*@, p / 4 @*/) == no {
 				//@ preU := u.Repr()
 				//@ preV := v.Repr()
 				//@ preA := A.Repr()
@@ -888,7 +1058,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 				//@ gcdSubLemma(preU, preV)
 				A.add(C /*@, p / 4 @*/)
 				B.add(D /*@, p / 4 @*/)
-				if A.cmpGeq(m /*@, p / 4, p / 4 @*/) == yes {
+				if A.cmpGeq(m /*@, p / 4 @*/) == yes {
 					//@ AC_ge_BD_ge(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
 					A.sub(m /*@, p / 4 @*/)
 					B.sub(a /*@, p / 4 @*/)
@@ -908,7 +1078,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 				//@ gcdSubLemma2(preU, preV)
 				C.add(A /*@, p / 4 @*/)
 				D.add(B /*@, p / 4 @*/)
-				if C.cmpGeq(m /*@, p / 4, p / 4 @*/) == yes {
+				if C.cmpGeq(m /*@, p / 4 @*/) == yes {
 					//@ AC_ge_BD_ge(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
 					C.sub(m /*@, p / 4 @*/)
 					D.sub(a /*@, p / 4 @*/)
@@ -966,49 +1136,96 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 			// Open the opaque relational invariant to get the actual equation
 			// for the postcondition: u = A*a - B*m.
 			//@ reveal relU(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
-			//@ unfold acc(mMod.Inv(true), p/2)
-			//@ unfold acc(aMod.Inv(true), p/2)
+			//@ unfold acc(mMod.Inv(), p/2)
+			//@ unfold acc(aMod.Inv(), p/2)
 			return u, A, nil /*@, B.Repr() @*/
 		}
 	}
 }
 
-//@ trusted
-//@ requires noPerm < p && noPerm < q
-//@ preserves acc(x.Inv(), p) && acc(y.Inv(), q)
-//@ ensures res == (x.Repr() >= y.Repr() ? yes : no)
-func (x *Nat) cmpGeq(y *Nat /*@, ghost p perm, ghost q perm @*/) (res choice) {
-	// implementation elided (trusted)
-	return no
-}
-
-//@ trusted
-//@ requires noPerm < p && noPerm < q
-//@ preserves acc(a.Inv(), p) && acc(b.Inv(), q)
-//@ ensures res >= 0
-func maxLen(a, b *Nat /*@, ghost p perm, ghost q perm @*/) (res int) {
-	return max(len(a.limbs), len(b.limbs))
-}
-
+// cmpGeq returns 1 if x >= y, and 0 otherwise.
+//
+// Both operands must have the same announced length.
+//
+//go:norace
 //@ trusted
 //@ requires noPerm < p
-//@ preserves acc(n.Inv(), p)
-//@ ensures res >= 0
-func natLen(n *Nat /*@, ghost p perm @*/) (res int) {
-	return len(n.limbs)
+//@ requires acc(x.Inv(), p) && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ ensures  acc(x.Inv(), p) && acc(y.Inv(), p)
+//@ ensures  res == (x.Repr() >= y.Repr() ? yes : no)
+func (x *Nat) cmpGeq(y *Nat /*@, ghost p perm @*/) (res choice) {
+	// Eliminate bounds checks in the loop.
+	size := len(x.limbs)
+	xLimbs := x.limbs[:size]
+	yLimbs := y.limbs[:size]
+
+	var c uint
+	for i := 0; i < size; i++ {
+		_, c = bits.Sub(xLimbs[i], yLimbs[i], c)
+	}
+	// If there was a carry, then subtracting y underflowed, so
+	// x is not greater than or equal to y.
+	return not(choice(c))
 }
 
-//@ trusted
+// since Go has a built-in max function, we wrap it in
+// spec comments such that only Gobra but not the Go compiler
+// picks it up:
+/*@
+ghost
+decreases
+pure func gmax(a, b int) int {
+	return a >= b ? a : b
+}
+
+ensures r == gmax(a, b)
+decreases
+func max(a, b int) (r int) {
+	if a >= b {
+		return a
+	}
+	return b
+}
+@*/
+
+//@ requires  noPerm < p
+//@ preserves acc(a.Inv(), p) && acc(b.Inv(), p)
+//@ ensures   res == gmax(a.AnnouncedLen(), b.AnnouncedLen())
+func maxLen(a, b *Nat /*@, ghost p perm @*/) (res int) {
+	//@ unfold acc(a.Inv(), p/2)
+	//@ unfold acc(b.Inv(), p/2)
+	res = max(len(a.limbs), len(b.limbs))
+	//@ fold acc(b.Inv(), p/2)
+	//@ fold acc(a.Inv(), p/2)
+	return
+}
+
+//@ requires  noPerm < p
+//@ preserves acc(n.Inv(), p)
+//@ ensures   res == n.AnnouncedLen()
+func natLen(n *Nat /*@, ghost p perm @*/) (res int) {
+	//@ unfold acc(n.Inv(), p/2)
+	res = len(n.limbs)
+	//@ fold acc(n.Inv(), p/2)
+	return
+}
+
+//@ trusted // because we cannot show `n.Repr() == 1`
 //@ preserves n.Inv()
-//@ ensures n.Repr() == 1
+//@ ensures   n.Repr() == 1
+//@ ensures   n.AnnouncedLen() == gmax(1, old(n.AnnouncedLen()))
 func setOne(n *Nat) {
+	n.reset(max(1, natLen(n /*@, 1/2 @*/)))
+	//@ unfold n.Inv()
 	n.limbs[0] = 1
+	//@ fold n.Inv()
 }
 
 //go:norace
 //@ trusted
 //@ preserves a.Inv()
-//@ ensures a.Repr() == old(a.Repr()) / 2
+//@ ensures   a.Repr() == old(a.Repr()) / 2
 func rshift1(a *Nat, carry uint) {
 	size := len(a.limbs)
 	aLimbs := a.limbs[:size]
