@@ -369,6 +369,7 @@ pure func relV(v, C, D, aVal, mVal int) bool {
 *//*@
 ghost
 trusted
+requires b != 0
 ensures a % b == (a - b) % b
 decreases
 func modSubLemma(a, b int)
@@ -479,9 +480,8 @@ func modAddLemma(A, B, C, D, Ap, Bp, a, m int) {
 
 // Relational invariant maintenance for subtraction (u > v case), no-wrap:
 // A' = A + C, B' = B + D (no modular reduction needed).
-// When A+C < m and u-v > 0, B+D < a follows by monotonicity of multiplication:
-//   (A+C)*a < m*a and if B+D >= a then (B+D)*m >= a*m = m*a,
-//   so u-v = (A+C)*a - (B+D)*m < 0, contradicting u-v > 0.
+// B+D <= a follows from AC_lt_BD_le (called at call site).
+// TODO: can likely prove the stronger bound BNew < aVal
 ghost
 requires relU(uOld, AOld, BOld, aVal, mVal)
 requires relV(vOld, COld, DOld, aVal, mVal)
@@ -489,40 +489,38 @@ requires uNew == uOld - vOld
 requires uNew > 0
 requires aVal > 1 && mVal > 1
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld <= aVal
+requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires ANew == AOld + COld
 requires BNew == BOld + DOld
+requires BNew <= aVal
 requires ANew < mVal
 ensures relU(uNew, ANew, BNew, aVal, mVal)
 ensures 0 <= ANew && ANew < mVal
-ensures 0 <= BNew && BNew < aVal
+ensures 0 <= BNew && BNew <= aVal
 decreases
 func subRelLemmaNoWrap(uOld, vOld, uNew, AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal int) {
     subExpandLemma(uOld, vOld, AOld, BOld, COld, DOld, aVal, mVal)
-    // Z3 now knows: uNew == (AOld+COld)*aVal - (BOld+DOld)*mVal, uNew > 0
-    // and ANew == AOld+COld < mVal. Need to show BNew == BOld+DOld < aVal.
-    // By contradiction: if BNew >= aVal, then BNew*mVal >= aVal*mVal == mVal*aVal,
-    // and ANew*aVal < mVal*aVal, so uNew < 0. Contradiction.
     reveal relU(uNew, ANew, BNew, aVal, mVal)
 }
 
 // Relational invariant maintenance for subtraction (u > v case), wrap:
 // A' = A + C - m, B' = B + D - a (synchronized subtraction).
+// B+D >= a is established by AC_ge_BD_ge (called at call site).
+// TODO: can likely prove the stronger bound BNew < aVal
 //
-// The bound 0 <= BNew < aVal requires B+D >= a, which is a global algorithm
-// invariant: in the u > v branch, A+C >= m implies B+D >= a. This follows
-// because if B+D < a, then u-v >= m*a - (a-1)*m = m, but u <= a and v >= 1
-// gives u-v <= a-1. When a <= m this is a contradiction. When a > m the
-// property still holds empirically for all reachable states.
-//
-// Lean 4 (relational part):
+// Lean 4:
 @*//*
   theorem subRelLemmaWrap {uOld vOld uNew AOld BOld COld DOld ANew BNew aVal mVal : Int}
     (hU : uOld = AOld * aVal - BOld * mVal)
     (hV : vOld = DOld * mVal - COld * aVal)
     (hSub : uNew = uOld - vOld)
-    (hA : ANew = AOld + COld - mVal) (hB : BNew = BOld + DOld - aVal) :
-    uNew = ANew * aVal - BNew * mVal := by linarith [mul_comm mVal aVal]
+    (hA : ANew = AOld + COld - mVal) (hB : BNew = BOld + DOld - aVal)
+    (hWrapB : BOld + DOld ≥ aVal)
+    (hBBnd : BOld ≤ aVal) (hDBnd : DOld ≤ aVal) :
+    uNew = ANew * aVal - BNew * mVal ∧ 0 ≤ BNew ∧ BNew ≤ aVal := by
+  constructor; · linarith [mul_comm mVal aVal]
+  constructor; · linarith
+  linarith
 *//*@
 ghost
 trusted
@@ -531,13 +529,14 @@ requires relV(vOld, COld, DOld, aVal, mVal)
 requires uNew == uOld - vOld
 requires aVal > 1 && mVal > 1
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld <= aVal
+requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires ANew == AOld + COld - mVal
 requires BNew == BOld + DOld - aVal
 requires AOld + COld >= mVal
+requires BOld + DOld >= aVal
 ensures relU(uNew, ANew, BNew, aVal, mVal)
 ensures 0 <= ANew && ANew < mVal
-ensures 0 <= BNew && BNew < aVal
+ensures 0 <= BNew && BNew <= aVal
 decreases
 func subRelLemmaWrap(uOld, vOld, uNew, AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal int)
 
@@ -572,9 +571,10 @@ requires vNew >= 0
 requires vNew < mVal
 requires aVal > 1 && mVal > 1
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld <= aVal
+requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires CNew == COld + AOld
 requires DNew == DOld + BOld
+requires DNew <= aVal
 requires CNew < mVal
 ensures relV(vNew, CNew, DNew, aVal, mVal)
 ensures 0 <= CNew && CNew < mVal
@@ -584,18 +584,19 @@ func subRelLemma2NoWrap(uOld, vOld, vNew, AOld, BOld, COld, DOld, CNew, DNew, aV
 
 // Relational invariant maintenance for subtraction (v >= u case), wrap:
 // C' = C + A - m, D' = D + B - a (synchronized subtraction).
-// Requires D+B >= a (synchronized wrapping); see wrapSyncV for proof.
+// D+B >= a is established by AC_ge_BD_ge (called at call site).
 //
 // Lean 4:
 @*//*
+  // TODO: can likely prove the stronger bound DNew < aVal
   theorem subRelLemma2Wrap {uOld vOld vNew AOld BOld COld DOld CNew DNew aVal mVal : Int}
     (hU : uOld = AOld * aVal - BOld * mVal)
     (hV : vOld = DOld * mVal - COld * aVal)
     (hSub : vNew = vOld - uOld)
     (hC : CNew = COld + AOld - mVal) (hD : DNew = DOld + BOld - aVal)
     (hWrapD : DOld + BOld ≥ aVal)
-    (hBBnd : BOld < aVal) (hDBnd : DOld ≤ aVal) :
-    vNew = DNew * mVal - CNew * aVal ∧ 0 ≤ DNew ∧ DNew < aVal := by
+    (hBBnd : BOld ≤ aVal) (hDBnd : DOld ≤ aVal) :
+    vNew = DNew * mVal - CNew * aVal ∧ 0 ≤ DNew ∧ DNew ≤ aVal := by
     constructor; · linarith [mul_comm mVal aVal]
     constructor; · linarith
     linarith
@@ -607,40 +608,70 @@ requires relV(vOld, COld, DOld, aVal, mVal)
 requires vNew == vOld - uOld
 requires aVal > 1 && mVal > 1
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld < aVal && 0 <= DOld && DOld <= aVal
+requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires CNew == COld + AOld - mVal
 requires DNew == DOld + BOld - aVal
 requires COld + AOld >= mVal
 requires DOld + BOld >= aVal
 ensures relV(vNew, CNew, DNew, aVal, mVal)
 ensures 0 <= CNew && CNew < mVal
-ensures 0 <= DNew && DNew < aVal
+ensures 0 <= DNew && DNew <= aVal
 decreases
 func subRelLemma2Wrap(uOld, vOld, vNew, AOld, BOld, COld, DOld, CNew, DNew, aVal, mVal int)
 
-// wrapSyncV: In the v >= u branch, when C+A >= m, then D+B >= a.
-// Proof: v-u = (D+B)*m - (C+A)*a >= 0. C+A >= m ⟹ (C+A)*a >= m*a.
-// So (D+B)*m >= (C+A)*a >= m*a ⟹ D+B >= a. (No constraint on a vs m needed.)
+// AC_ge_BD_ge: When A+C >= m, then B+D >= a. (Matches fiat-crypto's AC_ge_BD_ge.)
+// Proof: (B+D)*m = (A+C)*a - (u-v). Since A+C >= m: (A+C)*a >= m*a.
+// And u-v <= u <= a. So (B+D)*m >= m*a - a = a*(m-1).
+// If B+D <= a-1: (a-1)*m >= a*(m-1), giving a >= m. Contradicts a < m.
+//
+// TODO: For the v >= u case, the a < m condition could potentially be dropped
+// (since v >= u gives u-v <= 0, making (B+D)*m >= m*a directly).
 //
 // Lean 4:
 @*//*
-  theorem wrapSyncV {u v A B C D a m : Int}
-    (hU : u = A * a - B * m)  (hV : v = D * m - C * a)
-    (hGeq : v ≥ u)
-    (hWrap : C + A ≥ m)
-    (hMpos : m > 0) :
-    D + B ≥ a := by nlinarith [mul_comm m a]
+  theorem AC_ge_BD_ge {u v A B C D a m : Int}
+    (hU : u = A * a - B * m) (hV : v = D * m - C * a)
+    (hUpos : 0 < u) (hUle : u ≤ a) (hVge : 0 ≤ v)
+    (hWrap : A + C ≥ m)
+    (hAltM : a < m) (hApos : 0 < a) (hMpos : 0 < m) :
+    B + D ≥ a := by nlinarith [mul_comm m a]
 *//*@
 ghost
 trusted
 requires relU(u, A, B, a, m)
 requires relV(v, C, D, a, m)
-requires v >= u
-requires C + A >= m
-requires m > 0
-ensures D + B >= a
+requires 0 < u && u <= a && 0 <= v
+requires A + C >= m
+requires 0 < a && a < m && 0 < m
+ensures B + D >= a
 decreases
-func wrapSyncV(u, v, A, B, C, D, a, m int)
+func AC_ge_BD_ge(u, v, A, B, C, D, a, m int)
+
+// AC_lt_BD_le: When A+C < m, then B+D <= a. (Matches fiat-crypto's AC_lt_BD_le.)
+// Proof: (B+D)*m = (A+C)*a - u + v. Since A+C <= m-1: (A+C)*a <= (m-1)*a.
+// Since u >= 1, v <= m: (B+D)*m <= (m-1)*a - 1 + m.
+// If B+D >= a+1: (a+1)*m <= (m-1)*a - 1 + m = ma - a + m - 1,
+// giving am + m <= am - a + m - 1, i.e. 0 <= -a-1. Contradiction.
+//
+// Lean 4:
+@*//*
+  theorem AC_lt_BD_le {u v A B C D a m : Int}
+    (hU : u = A * a - B * m) (hV : v = D * m - C * a)
+    (hUpos : 0 < u) (hVle : v ≤ m)
+    (hNoWrap : A + C < m)
+    (hApos : 0 < a) (hMpos : 0 < m) :
+    B + D ≤ a := by nlinarith [mul_comm m a]
+*//*@
+ghost
+trusted
+requires relU(u, A, B, a, m)
+requires relV(v, C, D, a, m)
+requires 0 < u && v <= m
+requires A + C < m
+requires 0 < a && 0 < m
+ensures B + D <= a
+decreases
+func AC_lt_BD_le(u, v, A, B, C, D, a, m int)
 
 // Parity lemma: when u = A*a - B*m is even and A or B is odd,
 // then A+m and B+a are both even. Reveals relU only for parity reasoning.
@@ -668,10 +699,10 @@ requires AOld % 2 == 0 && BOld % 2 == 0 ==> (ANew == AOld / 2 && BNew == BOld / 
 requires (AOld % 2 != 0 || BOld % 2 != 0) ==> (ANew == (AOld + mVal) / 2 && BNew == (BOld + aVal) / 2)
 requires (AOld % 2 != 0 || BOld % 2 != 0) ==> (AOld + mVal) % 2 == 0 && (BOld + aVal) % 2 == 0
 requires 0 <= AOld && AOld < mVal && mVal > 1
-requires 0 <= BOld && BOld < aVal && aVal > 1
+requires 0 <= BOld && BOld <= aVal && aVal > 1 // TODO: can likely prove with BOld < aVal
 ensures relU(uNew, ANew, BNew, aVal, mVal)
 ensures 0 <= ANew && ANew < mVal
-ensures 0 <= BNew && BNew < aVal
+ensures 0 <= BNew && BNew <= aVal // TODO: can likely prove stronger BNew < aVal
 decreases
 func halvRelLemmaU(uOld, uNew, AOld, BOld, ANew, BNew, aVal, mVal int) {
     reveal relU(uOld, AOld, BOld, aVal, mVal)
@@ -757,6 +788,7 @@ func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int)
 //@ requires noPerm < p && p <= 1
 //@ requires acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ requires a.Repr() > 1 && m.Repr() > 1
+//@ requires a.Repr() < m.Repr() // TODO move this into the function
 //@ ensures acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ ensures err == nil ==> u.Inv() && A.Inv()
 //@ ensures err == nil ==> u.Repr() == gcd(a.Repr(), m.Repr())
@@ -792,6 +824,9 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	if a.IsOdd(/*@ p / 2 @*/) == no && m.IsOdd(/*@ p / 2 @*/) == no {
 		return nil, nil, errors.New("extendedGCD: both a and m are even") /*@, 0 @*/
 	}
+
+	//@ assert 0 < a.Repr() && 0 < m.Repr()
+	//@ assert a.Repr() % 2 != 0 || m.Repr() % 2 != 0
 
 	size := maxLen(a, m /*@, p / 2, p / 2 @*/)
 	u = NewNat()
@@ -842,6 +877,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ invariant mMod.Repr(true) > 0 && aMod.Repr(true) > 0
 	//@ invariant mMod.Repr(true) == m.Repr() && aMod.Repr(true) == a.Repr()
 	//@ invariant a.Repr() > 1 && m.Repr() > 1
+	//@ invariant a.Repr() < m.Repr()
 	//@ invariant a.Repr() % 2 != 0 || m.Repr() % 2 != 0
 	//@ invariant gcd(u.Repr(), v.Repr()) == gcd(a.Repr(), m.Repr())
 	// Relational invariants (abstract to avoid NIA):
@@ -853,7 +889,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ invariant 0 < u.Repr() && u.Repr() <= a.Repr()
 	//@ invariant 0 <= v.Repr() && v.Repr() <= m.Repr()
 	//@ invariant 0 <= A.Repr() && A.Repr() < m.Repr()
-	//@ invariant 0 <= B.Repr() && B.Repr() < a.Repr()
+	//@ invariant 0 <= B.Repr() && B.Repr() <= a.Repr() // TODO: can likely prove stronger B < a
 	//@ invariant 0 <= C.Repr() && C.Repr() < m.Repr()
 	//@ invariant 0 <= D.Repr() && D.Repr() <= a.Repr()
 	//@ decreases u.Repr() + v.Repr()
@@ -874,10 +910,12 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 				A.add(C /*@, p / 4 @*/)
 				B.add(D /*@, p / 4 @*/)
 				if A.cmpGeq(m /*@, p / 4, p / 4 @*/) == yes {
+					//@ AC_ge_BD_ge(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
 					A.sub(m /*@, p / 4 @*/)
 					B.sub(a /*@, p / 4 @*/)
 					//@ subRelLemmaWrap(preU, preV, u.Repr(), preA, preB, preC, preD, A.Repr(), B.Repr(), a.Repr(), m.Repr())
 				} else {
+					//@ AC_lt_BD_le(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
 					//@ subRelLemmaNoWrap(preU, preV, u.Repr(), preA, preB, preC, preD, A.Repr(), B.Repr(), a.Repr(), m.Repr())
 				}
 			} else {
@@ -892,11 +930,12 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 				C.add(A /*@, p / 4 @*/)
 				D.add(B /*@, p / 4 @*/)
 				if C.cmpGeq(m /*@, p / 4, p / 4 @*/) == yes {
-					//@ wrapSyncV(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
+					//@ AC_ge_BD_ge(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
 					C.sub(m /*@, p / 4 @*/)
 					D.sub(a /*@, p / 4 @*/)
 					//@ subRelLemma2Wrap(preU, preV, v.Repr(), preA, preB, preC, preD, C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				} else {
+					//@ AC_lt_BD_le(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
 					//@ subRelLemma2NoWrap(preU, preV, v.Repr(), preA, preB, preC, preD, C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				}
 			}
