@@ -202,11 +202,10 @@ pure func (m *Modulus) Repr(natOnly bool) int {
 //@ requires 0 <= x.Repr() && x.Repr() < m.Repr(natOnly)
 //@ requires 0 <= y.Repr() && y.Repr() < m.Repr(natOnly)
 //@ ensures x.Inv() && acc(y.Inv(), p) && acc(m.Inv(natOnly), q)
-//@ ensures m.Repr(natOnly) > 0
 //@ ensures 0 <= x.Repr() && x.Repr() < m.Repr(natOnly)
 //@ ensures old(x.Repr()) + y.Repr() < m.Repr(natOnly) ==> x.Repr() == old(x.Repr()) + y.Repr()
 //@ ensures old(x.Repr()) + y.Repr() >= m.Repr(natOnly) ==> x.Repr() == old(x.Repr()) + y.Repr() - m.Repr(natOnly)
-func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p perm, ghost q perm, ghost natOnly bool @*/) *Nat {
+func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p, q perm, ghost natOnly bool @*/) *Nat {
 	overflow := x.add(y)
 	x.maybeSubtractModulus(choice(overflow), m)
 	return x
@@ -232,7 +231,7 @@ func gcdBaseLemma(a int) {
 
 // gcd(a, b) == gcd(a - b, b) when a > b > 0
 ghost
-requires a > 0 && b > 0 && a > b
+requires 0 < b && b < a
 ensures gcd(a, b) == gcd(a - b, b)
 decreases
 func gcdSubLemma(a, b int) {
@@ -243,47 +242,26 @@ func gcdSubLemma(a, b int) {
 
 // gcd commutativity: gcd(a, b) == gcd(b, a)
 ghost
-requires a >= 0 && b >= 0
+requires 0 <= a && 0 <= b
 ensures gcd(a, b) == gcd(b, a)
 decreases
 func gcdCommLemma(a, b int) {
-    if a == 0 && b == 0 {
+    if a == b {
         // reflexive
-    } else if a == 0 {
-        gcdBaseLemma(b)        // gcd(b, 0) == b
-        gcdUnfoldLemma(a, b)   // gcd(0, b) == gcd(b, 0 % b)
-        assert 0 % b == 0      // hint for Z3
-    } else if b == 0 {
-        gcdBaseLemma(a)        // gcd(a, 0) == a
-        gcdUnfoldLemma(b, a)   // gcd(0, a) == gcd(a, 0 % a)
-        assert 0 % a == 0      // hint for Z3
-    } else if a < b {
-        gcdUnfoldLemma(a, b)   // gcd(a, b) == gcd(b, a % b), a % b == a since a < b
-    } else if a == b {
-        gcdUnfoldLemma(a, b)   // gcd(a, a) == gcd(a, a % a) == gcd(a, 0)
-        gcdUnfoldLemma(b, a)   // gcd(a, a) == gcd(a, a % a) == gcd(a, 0)
+    } else if a == 0 || a < b {
+	 	reveal gcd(a, b)
     } else {
-        gcdUnfoldLemma(b, a)   // gcd(b, a) == gcd(a, b % a), b % a == b since b < a
+        reveal gcd(b, a)
     }
-}
-
-// Unfolds gcd one step: gcd(a, b) == gcd(b, a % b) when b > 0
-ghost
-requires a >= 0 && b > 0
-ensures gcd(a, b) == gcd(b, a % b)
-decreases
-func gcdUnfoldLemma(a, b int) {
-    reveal gcd(a, b)
 }
 
 // gcd(a, b) == gcd(a, b - a) when b >= a > 0
 ghost
-requires a > 0 && b > 0 && b >= a
+requires 0 < a && a <= b
 ensures gcd(a, b) == gcd(a, b - a)
 decreases
 func gcdSubLemma2(a, b int) {
-    if b == a {
-        gcdBaseLemma(a)
+    if a == b {
         reveal gcd(a, a)
     } else {
         gcdCommLemma(a, b)
@@ -294,7 +272,7 @@ func gcdSubLemma2(a, b int) {
 
 // gcd(a, b) == gcd(a / 2, b) when a is even and b is odd
 ghost
-requires a >= 0 && b >= 0 && a % 2 == 0 && b % 2 == 1
+requires 0 <= a && 0 <= b && a % 2 == 0 && b % 2 == 1
 ensures gcd(a, b) == gcd(a / 2, b)
 decreases a + b
 func gcdHalfLemma(a, b int) {
@@ -323,14 +301,13 @@ func gcdHalfLemma(a, b int) {
         gcdSubLemma(a, b)                // gcd(a, b) == gcd(a-b, b)
         gcdSubLemma(a - b, b)            // gcd(a-b, b) == gcd(a-2b, b)
         gcdHalfLemma(a - 2 * b, b)       // IH: gcd(a-2b, b) == gcd((a-2b)/2, b)
-        assert (a - 2 * b) / 2 == a / 2 - b
         gcdSubLemma(a / 2, b)            // gcd(a/2, b) == gcd(a/2-b, b)
     }
 }
 
 // gcd(a, b) == gcd(a, b / 2) when b is even and a is odd
 ghost
-requires a >= 0 && b >= 0 && b % 2 == 0 && a % 2 == 1
+requires 0 <= a && 0 <= b && b % 2 == 0 && a % 2 == 1
 ensures gcd(a, b) == gcd(a, b / 2)
 decreases
 func gcdHalfLemma2(a, b int) {
@@ -363,13 +340,14 @@ pure func relV(v, C, D, aVal, mVal int) bool {
 //
 // Lean 4:
 @*//*
+  // 20260226 LA: checked in Lean
   theorem modSubLemma {a b : Int} :
       a % b = (a - b) % b := by
     simp
 *//*@
 ghost
 trusted
-requires b != 0
+requires b != 0 // required for well-formedness
 ensures a % b == (a - b) % b
 decreases
 func modSubLemma(a, b int)
@@ -378,6 +356,7 @@ func modSubLemma(a, b int)
 //
 // Lean 4:
 @*//*
+  // 20260226 LA: checked in Lean
   theorem prodParityLemma {a b : Int} :
       (a * b) % 2 = (a % 2) * (b % 2) := by
     rw [Int.mul_emod]
@@ -393,20 +372,24 @@ func prodParityLemma(a, b int)
 
 // ===== End trusted mathematical lemmas ===================================
 
-// Positive product: a > 0 and b > 0 implies a * b > 0.
+// Positive product: 0 < a and 0 < b implies 0 < a * b.
 // Isolates this NIA fact so Z3 handles it in a small context.
 ghost
-requires a > 0 && b > 0
-ensures a * b > 0
+requires 0 < a && 0 < b
+ensures 0 < a * b
 decreases
-func posProdLemma(a, b int) {}
+func posProdLemma(a, b int) {
+	// no body needed
+}
 
 // Distributive law: (a + b) * c == a * c + b * c
 // This isolates a single NIA fact for Z3.
 ghost
 ensures (a + b) * c == a * c + b * c
 decreases
-func distLemma(a, b, c int) {}
+func distLemma(a, b, c int) {
+	// no body needed
+}
 
 // Expand u - v using relational invariants:
 // u = A*a - B*m and v = D*m - C*a imply u - v = (A+C)*a - (B+D)*m.
@@ -481,7 +464,6 @@ func modAddLemma(A, B, C, D, Ap, Bp, a, m int) {
 // Relational invariant maintenance for subtraction (u > v case), no-wrap:
 // A' = A + C, B' = B + D (no modular reduction needed).
 // B+D <= a follows from AC_lt_BD_le (called at call site).
-// TODO: can likely prove the stronger bound BNew < aVal
 ghost
 requires relU(uOld, AOld, BOld, aVal, mVal)
 requires relV(vOld, COld, DOld, aVal, mVal)
@@ -492,7 +474,7 @@ requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
 requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires ANew == AOld + COld
 requires BNew == BOld + DOld
-requires BNew <= aVal
+requires BNew < aVal // this is stronger than in fiat crypto
 requires ANew < mVal
 ensures relU(uNew, ANew, BNew, aVal, mVal)
 ensures 0 <= ANew && ANew < mVal
@@ -787,7 +769,7 @@ func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int)
 // It is an error if either a or m is zero, or if they are both even.
 //@ requires noPerm < p && p <= 1
 //@ requires acc(a.Inv(), p) && acc(m.Inv(), p)
-//@ requires a.Repr() > 1 && m.Repr() > 1
+//@ requires a.Repr() > 1 && m.Repr() > 1 // TODO: why do we need that?
 //@ requires a.Repr() < m.Repr() // TODO move this into the function
 //@ ensures acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ ensures err == nil ==> u.Inv() && A.Inv()
