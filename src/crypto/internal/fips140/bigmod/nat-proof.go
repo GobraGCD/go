@@ -435,9 +435,9 @@ func subExpandLemma2(u, v, A, B, C, D, a, m int) {
 //
 // The only NIA fact used is commutativity: m*a = a*m.
 ghost
-requires a > 1 && m > 1
+requires a > 0 && m > 0
 requires 0 <= A && A < m && 0 <= C && C < m
-requires 0 <= B && B < a && 0 <= D && D < a
+requires 0 <= B && B <= a && 0 <= D && D <= a
 requires (A + C >= m) == (B + D >= a)
 requires A + C < m ==> Ap == A + C
 requires A + C >= m ==> Ap == A + C - m
@@ -469,12 +469,12 @@ requires relU(uOld, AOld, BOld, aVal, mVal)
 requires relV(vOld, COld, DOld, aVal, mVal)
 requires uNew == uOld - vOld
 requires uNew > 0
-requires aVal > 1 && mVal > 1
+requires aVal > 0 && mVal > 0
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
 requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires ANew == AOld + COld
 requires BNew == BOld + DOld
-requires BNew < aVal // this is stronger than in fiat crypto
+requires BNew <= aVal
 requires ANew < mVal
 ensures relU(uNew, ANew, BNew, aVal, mVal)
 ensures 0 <= ANew && ANew < mVal
@@ -509,7 +509,7 @@ trusted
 requires relU(uOld, AOld, BOld, aVal, mVal)
 requires relV(vOld, COld, DOld, aVal, mVal)
 requires uNew == uOld - vOld
-requires aVal > 1 && mVal > 1
+requires aVal > 0 && mVal > 0
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
 requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires ANew == AOld + COld - mVal
@@ -533,7 +533,7 @@ func subRelLemmaWrap(uOld, vOld, uNew, AOld, BOld, COld, DOld, ANew, BNew, aVal,
     (hV : vOld = DOld * mVal - COld * aVal)
     (hSub : vNew = vOld - uOld)
     (hVge : vNew ≥ 0) (hVlt : vNew < mVal)
-    (hAgt : aVal > 1) (hMgt : mVal > 1)
+    (hAgt : aVal > 0) (hMgt : mVal > 0)
     (hC : CNew = COld + AOld) (hD : DNew = DOld + BOld)
     (hClt : CNew < mVal) :
     vNew = DNew * mVal - CNew * aVal ∧ 0 ≤ DNew ∧ DNew ≤ aVal := by
@@ -551,7 +551,7 @@ requires relV(vOld, COld, DOld, aVal, mVal)
 requires vNew == vOld - uOld
 requires vNew >= 0
 requires vNew < mVal
-requires aVal > 1 && mVal > 1
+requires aVal > 0 && mVal > 0
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
 requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires CNew == COld + AOld
@@ -588,7 +588,7 @@ trusted
 requires relU(uOld, AOld, BOld, aVal, mVal)
 requires relV(vOld, COld, DOld, aVal, mVal)
 requires vNew == vOld - uOld
-requires aVal > 1 && mVal > 1
+requires aVal > 0 && mVal > 0
 requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
 requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
 requires CNew == COld + AOld - mVal
@@ -680,8 +680,8 @@ requires uNew == uOld / 2
 requires AOld % 2 == 0 && BOld % 2 == 0 ==> (ANew == AOld / 2 && BNew == BOld / 2)
 requires (AOld % 2 != 0 || BOld % 2 != 0) ==> (ANew == (AOld + mVal) / 2 && BNew == (BOld + aVal) / 2)
 requires (AOld % 2 != 0 || BOld % 2 != 0) ==> (AOld + mVal) % 2 == 0 && (BOld + aVal) % 2 == 0
-requires 0 <= AOld && AOld < mVal && mVal > 1
-requires 0 <= BOld && BOld <= aVal && aVal > 1 // TODO: can likely prove with BOld < aVal
+requires 0 <= AOld && AOld < mVal && mVal > 0
+requires 0 <= BOld && BOld <= aVal && aVal > 0
 ensures relU(uNew, ANew, BNew, aVal, mVal)
 ensures 0 <= ANew && ANew < mVal
 ensures 0 <= BNew && BNew <= aVal // TODO: can likely prove stronger BNew < aVal
@@ -740,8 +740,8 @@ func parityLemmaV(v, C, D, a, m int) {
     (hEE : COld % 2 = 0 ∧ DOld % 2 = 0 → CNew = COld / 2 ∧ DNew = DOld / 2)
     (hOE : (COld % 2 ≠ 0 ∨ DOld % 2 ≠ 0) → CNew = (COld + mVal) / 2 ∧ DNew = (DOld + aVal) / 2)
     (hPar : (COld % 2 ≠ 0 ∨ DOld % 2 ≠ 0) → (COld + mVal) % 2 = 0 ∧ (DOld + aVal) % 2 = 0)
-    (hCBnd : 0 ≤ COld ∧ COld < mVal ∧ mVal > 1)
-    (hDBnd : 0 ≤ DOld ∧ DOld ≤ aVal ∧ aVal > 1) :
+    (hCBnd : 0 ≤ COld ∧ COld < mVal ∧ mVal > 0)
+    (hDBnd : 0 ≤ DOld ∧ DOld ≤ aVal ∧ aVal > 0) :
     vNew = DNew * mVal - CNew * aVal ∧ 0 ≤ CNew ∧ CNew < mVal ∧ 0 ≤ DNew ∧ DNew ≤ aVal := by
     omega
 *//*@
@@ -753,8 +753,8 @@ requires vNew == vOld / 2
 requires COld % 2 == 0 && DOld % 2 == 0 ==> (CNew == COld / 2 && DNew == DOld / 2)
 requires (COld % 2 != 0 || DOld % 2 != 0) ==> (CNew == (COld + mVal) / 2 && DNew == (DOld + aVal) / 2)
 requires (COld % 2 != 0 || DOld % 2 != 0) ==> (COld + mVal) % 2 == 0 && (DOld + aVal) % 2 == 0
-requires 0 <= COld && COld < mVal && mVal > 1
-requires 0 <= DOld && DOld <= aVal && aVal > 1
+requires 0 <= COld && COld < mVal && mVal > 0
+requires 0 <= DOld && DOld <= aVal && aVal > 0
 ensures relV(vNew, CNew, DNew, aVal, mVal)
 ensures 0 <= CNew && CNew < mVal
 ensures 0 <= DNew && DNew <= aVal
@@ -767,9 +767,8 @@ func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int)
 // u will have the size of the larger of a and m, and A will have the size of m.
 //
 // It is an error if either a or m is zero, or if they are both even.
-//@ requires noPerm < p && p <= 1
+//@ requires noPerm < p && p <= writePerm
 //@ requires acc(a.Inv(), p) && acc(m.Inv(), p)
-//@ requires a.Repr() > 1 && m.Repr() > 1 // TODO: why do we need that?
 //@ requires a.Repr() < m.Repr() // TODO move this into the function
 //@ ensures acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ ensures err == nil ==> u.Inv() && A.Inv()
@@ -835,8 +834,8 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	// Establish relational invariants:
 	// u = a = 1*a - 0*m, so relU(a, 1, 0, a, m) holds.
 	// v = m = 1*m - 0*a, so relV(m, 0, 1, a, m) holds.
-	//@ reveal relU(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
-	//@ reveal relV(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+	//@ assert reveal relU(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+	//@ assert reveal relV(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 
 	// Before and after each loop iteration, the following hold:
 	//
@@ -851,22 +850,20 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//
 	// After each loop iteration, u and v only get smaller, and at least one of
 	// them shrinks by at least a factor of two.
-	//@ invariant noPerm < p && p <= 1
-	//@ invariant u.Inv() && v.Inv()
-	//@ invariant A.Inv() && B.Inv() && C.Inv() && D.Inv()
+	//@ invariant u.Inv() && v.Inv() && A.Inv() && B.Inv() && C.Inv() && D.Inv()
 	//@ invariant acc(mMod.Inv(true), p/2) && acc(aMod.Inv(true), p/2)
 	//@ invariant acc(m.Inv(), p/2) && acc(a.Inv(), p/2)
 	//@ invariant mMod.Repr(true) > 0 && aMod.Repr(true) > 0
 	//@ invariant mMod.Repr(true) == m.Repr() && aMod.Repr(true) == a.Repr()
-	//@ invariant a.Repr() > 1 && m.Repr() > 1
+	//@ invariant a.Repr() > 0 && m.Repr() > 0
 	//@ invariant a.Repr() < m.Repr()
-	//@ invariant a.Repr() % 2 != 0 || m.Repr() % 2 != 0
+	//@ invariant a.Repr() % 2 == 1 || m.Repr() % 2 == 1
+	// Parity: at least one of u,v is odd (since gcd is odd).
+	//@ invariant u.Repr() % 2 == 1 || v.Repr() % 2 == 1
 	//@ invariant gcd(u.Repr(), v.Repr()) == gcd(a.Repr(), m.Repr())
 	// Relational invariants (abstract to avoid NIA):
 	//@ invariant relU(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
 	//@ invariant relV(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
-	// Parity: at least one of u,v is odd (since gcd is odd).
-	//@ invariant u.Repr() % 2 == 1 || v.Repr() % 2 == 1
 	// Bound invariants:
 	//@ invariant 0 < u.Repr() && u.Repr() <= a.Repr()
 	//@ invariant 0 <= v.Repr() && v.Repr() <= m.Repr()
@@ -973,8 +970,6 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 			//@ unfold acc(aMod.Inv(true), p/2)
 			return u, A, nil /*@, B.Repr() @*/
 		}
-		// Help Z3 with the termination proof: the halving reduced the sum.
-		//@ assert u.Repr() + v.Repr() < oldSum
 	}
 }
 
