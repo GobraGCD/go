@@ -59,7 +59,8 @@ type Nat struct {
 
 /*@
 pred (n *Nat) Inv() {
-    acc(n) && acc(n.limbs)
+    acc(n) &&
+	(forall j int :: { &n.limbs[j] } 0 <= j && j < cap(n.limbs) ==> acc(&n.limbs[j]))
 }
 
 ghost
@@ -75,7 +76,7 @@ ghost
 requires acc(n.Inv(), _)
 decreases
 // The number of values representable by n's limbs.
-pure func (n *Nat) ValCount() (res int) {
+pure func (n *Nat) ValCount() (res uint) {
 	return unfolding acc(n.Inv(), _) in exp(2, _W * n.AnnouncedLen())
 }
 
@@ -84,7 +85,7 @@ opaque
 requires acc(n.Inv(), _)
 ensures  0 <= res && res < n.ValCount()
 decreases
-pure func (n *Nat) Repr() (res int) {
+pure func (n *Nat) Repr() (res uint) {
 	// TODO: is it a good idea to reveal within a pure function?
 	return let _ := reveal n.AnnouncedLen() in
 		unfolding acc(n.Inv(), _) in limbsRepr(n.limbs)
@@ -94,17 +95,86 @@ ghost
 requires acc(limbs, _)
 ensures  0 <= res && res < exp(2, _W * len(limbs))
 decreases
-pure func limbsRepr(limbs []uint) (res int)
+pure func limbsRepr(limbs []uint) (res uint) {
+	return limbsReprHelperLemma(limbs, 0)
+}
+
+ghost
+ensures 0 <= i && i < exp(2, _W) && r == i
+decreases
+// we have to axiomatize the range of `uint` as this is currently not
+// supported by Gobra
+pure func uintRange(i uint) (r uint)
+
+ghost
+requires acc(limbs, _) && 0 <= idx && idx <= len(limbs)
+decreases len(limbs) - idx
+pure func limbsReprHelper(limbs []uint, idx int) (res uint) {
+	return idx == len(limbs) ? 0 : uintRange(limbs[idx]) + exp(2, _W) * limbsReprHelper(limbs, idx + 1)
+}
+
+ghost
+requires acc(limbs, _) && 0 <= idx && idx <= len(limbs)
+ensures  res == limbsReprHelper(limbs, idx)
+ensures  0 <= res && res < exp(2, _W * (len(limbs) - idx))
+decreases len(limbs) - idx
+pure func limbsReprHelperLemma(limbs []uint, idx int) (res uint) {
+    return let res := limbsReprHelper(limbs, idx) in
+        idx == len(limbs) ? res :
+            // prove for else branch
+            let prev_res := limbsReprHelperLemma(limbs, idx + 1) in
+            let _ := mulLtLemma(prev_res, len(limbs) - idx) in
+            res
+}
+
+ghost
+decreases
+requires 0 < diff
+requires a <= exp(2, _W * (diff - 1)) - 1
+ensures  exp(2, _W) * a <= exp(2, _W * diff) - exp(2, _W)
+pure func mulLtLemma(a uint, diff int) bool {
+    return let _ := mulIeqLemma(a, exp(2, _W * (diff - 1)) - 1, exp(2, _W)) in
+    let _ := expLemma(2, _W, _W * (diff - 1)) in
+    true
+}
+
+ghost
+requires a <= b && 0 <= c
+ensures  c * a <= c * b
+decreases
+pure func mulIeqLemma(a, b, c uint) bool {
+    return true
+}
 
 ghost
 requires noPerm < p
 requires acc(limbs1, p) && acc(limbs2, p)
-requires len(limbs1) == len(limbs2)
+requires len(limbs1) <= len(limbs2)
 requires forall j int :: { limbs1[j], limbs2[j] } 0 <= j && j < len(limbs1) ==> limbs1[j] == limbs2[j]
+requires forall j int :: { limbs2[j] } len(limbs1) <= j && j < len(limbs2) ==> limbs2[j] == 0
 ensures  acc(limbs1, p) && acc(limbs2, p)
 ensures  limbsRepr(limbs1) == limbsRepr(limbs2)
 decreases
-func equalLimbsRepr(limbs1, limbs2 []uint, p perm)
+func equalLimbsRepr(limbs1, limbs2 []uint, p perm) {
+    equalLimbsReprHelper(limbs1, limbs2, 0, p)
+}
+
+ghost
+requires noPerm < p
+requires 0 <= idx && idx <= len(limbs2)
+requires acc(limbs1, p) && acc(limbs2, p)
+requires len(limbs1) <= len(limbs2)
+requires forall j int :: { limbs1[j], limbs2[j] } idx <= j && j < len(limbs1) ==> limbs1[j] == limbs2[j]
+requires forall j int :: { limbs2[j] } len(limbs1) <= j && j < len(limbs2) ==> limbs2[j] == 0
+ensures  acc(limbs1, p) && acc(limbs2, p)
+ensures  idx <= len(limbs1) ==> limbsReprHelper(limbs1, idx) == limbsReprHelper(limbs2, idx)
+ensures  len(limbs1) <= idx ==> limbsReprHelper(limbs2, idx) == 0
+decreases len(limbs2) - idx
+func equalLimbsReprHelper(limbs1, limbs2 []uint, idx int, p perm) {
+	if idx != len(limbs2) {
+		equalLimbsReprHelper(limbs1, limbs2, idx + 1, p/2)
+	}
+}
 @*/
 
 // preallocTarget is the size in bits of the numbers used to implement the most
@@ -320,8 +390,22 @@ opaque
 requires 0 <= e
 ensures  0 < b ==> 0 < r
 decreases e
-pure func exp(b, e int) (r int) {
-	return e == 0 ? 1 : b * exp(b, e - 1)
+pure func exp(b, e int) (r uint) {
+	return e == 0 ? 1 : uint(b) * exp(b, e - 1)
+}
+
+ghost
+requires 0 < b
+requires 0 <= e1 && 0 <= e2
+ensures  exp(b, e1) * exp(b, e2) == exp(b, e1 + e2)
+decreases e1 + e2
+pure func expLemma(b, e1, e2 int) bool {
+    return e1 == 0 ?
+        reveal exp(b, e1) == 1 :
+        // prove for else branch
+        let _ := reveal exp(b, e1) * exp(b, e2) == uint(b) * exp(b, e1 - 1) * exp(b, e2) in
+        let _ := reveal exp(b, e1 + e2) == uint(b) * exp(b, (e1 - 1) + e2) in
+        expLemma(b, e1 - 1, e2)
 }
 @*/
 
@@ -396,7 +480,7 @@ pure func (m *Modulus) AnnouncedLen() (res int) {
 ghost
 requires acc(m.Inv(), _)
 decreases
-pure func (m *Modulus) Repr() int {
+pure func (m *Modulus) Repr() uint {
     return unfolding acc(m.Inv(), _) in m.nat.Repr()
 }
 @*/
@@ -461,7 +545,7 @@ ghost
 opaque
 requires  0 <= a && 0 <= m
 decreases m
-pure func gcd(a, m int) int {
+pure func gcd(a, m uint) uint {
     return m == 0 ? a : gcd(m, a % m)
 }
 
@@ -470,7 +554,7 @@ ghost
 requires 0 <= a
 ensures  gcd(a, 0) == a
 decreases
-func gcdBaseLemma(a int) {
+func gcdBaseLemma(a uint) {
     reveal gcd(a, 0)
 }
 
@@ -479,7 +563,7 @@ ghost
 requires 0 < b && b < a
 ensures  gcd(a, b) == gcd(a - b, b)
 decreases
-func gcdSubLemma(a, b int) {
+func gcdSubLemma(a, b uint) {
     reveal gcd(a, b)       // gcd(a, b) == gcd(b, a % b)
     reveal gcd(a - b, b)   // gcd(a-b, b) == gcd(b, (a-b) % b)
     modSubLemma(a, b)      // a % b == (a - b) % b
@@ -490,7 +574,7 @@ ghost
 requires 0 <= a && 0 <= b
 ensures gcd(a, b) == gcd(b, a)
 decreases
-func gcdCommLemma(a, b int) {
+func gcdCommLemma(a, b uint) {
     if a == b {
         // reflexive
     } else if a == 0 || a < b {
@@ -505,7 +589,7 @@ ghost
 requires 0 < a && a <= b
 ensures gcd(a, b) == gcd(a, b - a)
 decreases
-func gcdSubLemma2(a, b int) {
+func gcdSubLemma2(a, b uint) {
     if a == b {
         reveal gcd(a, a)
     } else {
@@ -520,7 +604,7 @@ ghost
 requires 0 <= a && 0 <= b && a % 2 == 0 && b % 2 == 1
 ensures gcd(a, b) == gcd(a / 2, b)
 decreases a + b
-func gcdHalfLemma(a, b int) {
+func gcdHalfLemma(a, b uint) {
     if a == 0 {
         // gcd(0, b) == gcd(0, b) trivially
     } else if a < b {
@@ -555,7 +639,7 @@ ghost
 requires 0 <= a && 0 <= b && b % 2 == 0 && a % 2 == 1
 ensures gcd(a, b) == gcd(a, b / 2)
 decreases
-func gcdHalfLemma2(a, b int) {
+func gcdHalfLemma2(a, b uint) {
     gcdCommLemma(a, b)     // gcd(a, b) == gcd(b, a)
     gcdHalfLemma(b, a)     // gcd(b, a) == gcd(b / 2, a)
     gcdCommLemma(b / 2, a) // gcd(b / 2, a) == gcd(a, b / 2)
@@ -566,7 +650,7 @@ func gcdHalfLemma2(a, b int) {
 ghost
 opaque
 decreases
-pure func nonLinearSub(u, A, B, aVal, mVal int) bool {
+pure func nonLinearSub(u, A, B, aVal, mVal uint) bool {
     return u == A * aVal - B * mVal
 }
 
@@ -593,7 +677,7 @@ trusted
 requires b != 0 // required for well-formedness
 ensures a % b == (a - b) % b
 decreases
-func modSubLemma(a, b int)
+func modSubLemma(a, b uint)
 
 // Product parity: (a * b) % 2 == (a % 2) * (b % 2).
 //
@@ -611,7 +695,7 @@ ghost
 trusted
 ensures (a * b) % 2 == (a % 2) * (b % 2)
 decreases
-func prodParityLemma(a, b int)
+func prodParityLemma(a, b uint)
 
 // Positive product: 0 < a and 0 < b implies 0 < a * b.
 // Isolates this NIA fact so Z3 handles it in a small context.
@@ -628,7 +712,7 @@ func posProdLemma(a, b int) {
 ghost
 ensures (a + b) * c == a * c + b * c
 decreases
-func distLemma(a, b, c int) {
+func distLemma(a, b, c uint) {
 	// no body needed
 }
 
@@ -640,7 +724,7 @@ requires nonLinearSub(u, A, B, a, m)
 requires nonLinearSub(v, D, C, m, a)
 ensures u - v == (A + C) * a - (B + D) * m
 decreases
-func subExpandLemma(u, v, A, B, C, D, a, m int) {
+func subExpandLemma(u, v, A, B, C, D, a, m uint) {
     reveal nonLinearSub(u, A, B, a, m)
     reveal nonLinearSub(v, D, C, m, a)
     distLemma(A, C, a)
@@ -653,7 +737,7 @@ requires nonLinearSub(u, A, B, a, m)
 requires nonLinearSub(v, D, C, m, a)
 ensures v - u == (D + B) * m - (C + A) * a
 decreases
-func subExpandLemma2(u, v, A, B, C, D, a, m int) {
+func subExpandLemma2(u, v, A, B, C, D, a, m uint) {
     reveal nonLinearSub(u, A, B, a, m)
     reveal nonLinearSub(v, D, C, m, a)
     distLemma(C, A, a)
@@ -686,7 +770,7 @@ requires B + D < a ==> Bp == B + D
 requires B + D >= a ==> Bp == B + D - a
 ensures (A + C) * a - (B + D) * m == Ap * a - Bp * m
 decreases
-func modAddLemma(A, B, C, D, Ap, Bp, a, m int) {
+func modAddLemma(A, B, C, D, Ap, Bp, a, m uint) {
 	if A + C < m {
 		// Neither wraps: Ap = A+C, Bp = B+D. Trivial.
 	} else {
@@ -717,7 +801,7 @@ requires 0 <= D && D <= a // range for D
 ensures nonLinearSub(u, A, B, a, m)
 ensures B <= a
 decreases
-func subRelLemmaNoWrap(u, v, A, B, C, D, a, m int) {
+func subRelLemmaNoWrap(u, v, A, B, C, D, a, m uint) {
 	uOld := u + v
 	AOld := A - C
 	BOld := B - D
@@ -740,7 +824,7 @@ requires 0 <= C && C < m // range for C
 requires 0 <= D && D <= a // range for D
 ensures nonLinearSub(u, A, B, a, m)
 decreases
-func subRelLemmaWrap(u, v, A, B, C, D, a, m int) {
+func subRelLemmaWrap(u, v, A, B, C, D, a, m uint) {
 	uOld := u + v
 	AOld := A - C + m
 	BOld := B - D + a
@@ -766,7 +850,7 @@ requires C < m // range of C
 ensures nonLinearSub(v, D, C, m, a)
 ensures D <= a
 decreases
-func subRelLemma2NoWrap(u, v, A, B, C, D, a, m int) {
+func subRelLemma2NoWrap(u, v, A, B, C, D, a, m uint) {
 	vOld := v + u
 	COld := C - A
 	DOld := D - B
@@ -788,7 +872,7 @@ requires 0 <= D && D <= B // range of D
 requires 0 <= B && B <= a // range of B
 ensures nonLinearSub(v, D, C, m, a)
 decreases
-func subRelLemma2Wrap(u, v, A, B, C, D, a, m int) {
+func subRelLemma2Wrap(u, v, A, B, C, D, a, m uint) {
 	vOld := v + u
 	COld := C - A + m
 	DOld := D - B + a
@@ -843,7 +927,7 @@ requires A + C >= m
 requires 0 < a && a < m && 0 < m
 ensures  B + D >= a
 decreases
-func AC_ge_BD_ge(u, v, A, B, C, D, a, m int)
+func AC_ge_BD_ge(u, v, A, B, C, D, a, m uint)
 
 // AC_lt_BD_le: When A+C < m, then B+D <= a. (Matches fiat-crypto's AC_lt_BD_le.)
 // Proof: (B+D)*m = (A+C)*a - u + v. Since A+C <= m-1: (A+C)*a <= (m-1)*a.
@@ -884,7 +968,7 @@ requires A + C < m
 requires 0 < a && 0 < m
 ensures  B + D <= a
 decreases
-func AC_lt_BD_le(u, v, A, B, C, D, a, m int)
+func AC_lt_BD_le(u, v, A, B, C, D, a, m uint)
 
 // Parity lemma: when u = A*a - B*m is even and A or B is odd,
 // then A+m and B+a are both even. Reveals nonLinearSub only for parity reasoning.
@@ -897,7 +981,7 @@ requires A % 2 != 0 || B % 2 != 0
 ensures (A + m) % 2 == 0
 ensures (B + a) % 2 == 0
 decreases
-func parityLemma(u, A, B, a, m int) {
+func parityLemma(u, A, B, a, m uint) {
     reveal nonLinearSub(u, A, B, a, m)
     prodParityLemma(A, a)
     prodParityLemma(B, m)
@@ -911,7 +995,7 @@ requires 0 <= A && A * 2 < m // range for A
 requires 0 <= B && B * 2 <= a // range for B
 ensures nonLinearSub(u, A, B, a, m)
 decreases
-func halvRelLemmaU1(u, A, B, a, m int) {
+func halvRelLemmaU1(u, A, B, a, m uint) {
 	uOld := u * 2
 	AOld := A * 2
 	BOld := B * 2
@@ -930,7 +1014,7 @@ ensures nonLinearSub(u, A, B, a, m)
 ensures 0 <= A
 ensures 0 <= B && B < a
 decreases
-func halvRelLemmaU2(u, A, B, a, m int) {
+func halvRelLemmaU2(u, A, B, a, m uint) {
 	uOld := u * 2
 	AOld := A * 2 - m
 	BOld := B * 2 - a
@@ -953,7 +1037,7 @@ requires C % 2 != 0 || D % 2 != 0
 ensures (C + m) % 2 == 0
 ensures (D + a) % 2 == 0
 decreases
-func parityLemmaV(v, C, D, a, m int) {
+func parityLemmaV(v, C, D, a, m uint) {
     reveal nonLinearSub(v, D, C, m, a)
     prodParityLemma(C, a)
     prodParityLemma(D, m)
@@ -967,7 +1051,7 @@ requires 0 <= C && C * 2 < m // range for C
 requires 0 <= D && D * 2 <= a // range for D
 ensures nonLinearSub(v, D, C, m, a)
 decreases
-func halvRelLemmaV1(v, C, D, a, m int) {
+func halvRelLemmaV1(v, C, D, a, m uint) {
 	vOld := v * 2
 	COld := C * 2
 	DOld := D * 2
@@ -988,7 +1072,7 @@ ensures nonLinearSub(v, D, C, m, a)
 ensures 0 <= C
 ensures 0 <= D
 decreases
-func halvRelLemmaV2(v, C, D, a, m int) {
+func halvRelLemmaV2(v, C, D, a, m uint) {
 	vOld := v * 2
 	COld := C * 2 - m
 	DOld := D * 2 - a
@@ -998,26 +1082,6 @@ func halvRelLemmaV2(v, C, D, a, m int) {
 	distLemma(COld, m, a)
 	distLemma(DOld, a, m)
 	assert reveal nonLinearSub(v, D, C, m, a)
-}
-
-// BStrictBound: B < a follows from u > 0, A < m, a > 0, and u = A*a - B*m.
-// This is strictly stronger than fiat-crypto's bound B ≤ a (BinaryExtendedGCD.v).
-// Proof: by contradiction. If B ≥ a, then B*m ≥ a*m (m > 0).
-// From u = A*a - B*m > 0: A*a > B*m ≥ a*m, so A*a > a*m.
-// Since a > 0: A > m. But A < m. Contradiction.
-//
-// The asymmetry with D (where D = a is achievable) comes from u > 0 (strict)
-// vs v ≥ 0 (non-strict): setting D = a, C = 0 gives v = a*m > 0, which is valid.
-// But setting B = a, A = 0 gives u = -a*m < 0, violating u > 0.
-ghost
-requires nonLinearSub(u, A, B, a, m)
-requires 0 < u
-requires 0 <= A && A < m
-requires a > 0 && m > 0
-ensures B < a
-decreases
-func BStrictBound(u, A, B, a, m int) {
-    reveal nonLinearSub(u, A, B, a, m)
 }
 @*/
 
@@ -1037,7 +1101,7 @@ func BStrictBound(u, A, B, a, m int) {
 //@ ensures  ok ==> gcd(a.Repr(), m.Repr()) == x.Repr() * a.Repr() - BRepr * m.Repr()
 //@ ensures  ok ==> x.AnnouncedLen() == m.AnnouncedLen()
 //@ ensures !ok ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
-func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, ok bool /*@, ghost BRepr int @*/) {
+func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, ok bool /*@, ghost BRepr uint @*/) {
 	//@ unfold acc(m.Inv(), p/2)
 	u, A, err /*@, BRepr @*/ := extendedGCD(a, m.nat /*@, p/4 @*/)
 	//@ fold acc(m.Inv(), p/2)
@@ -1123,7 +1187,7 @@ func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
 // Sync facts (for range reasoning at call sites):
 //@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> old(Z.Repr()) + W.Repr() <= bound2.Repr()
 //@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> old(Z.Repr()) + W.Repr() >= bound2.Repr()
-func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D int, ghost p perm @*/) {
+func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D uint, ghost p perm @*/) {
 	// Establish sync preconditions from nonLinearSub via AC_ge_BD_ge / AC_lt_BD_le:
 	/*@
 	ghost if A + C >= bound1.Repr() {
@@ -1186,7 +1250,7 @@ func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D int, gh
 //@ ensures  err == nil ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
 //@ ensures  err == nil ==> u.AnnouncedLen() == gmax(a.AnnouncedLen(), m.AnnouncedLen())
 //@ ensures  err == nil ==> A.AnnouncedLen() == m.AnnouncedLen()
-func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr int @*/) {
+func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr uint @*/) {
 	// This is the extended binary GCD algorithm described in the Handbook of
 	// Applied Cryptography, Algorithm 14.61, adapted by BoringSSL to bound
 	// coefficients and avoid negative numbers. For more details and proof of
