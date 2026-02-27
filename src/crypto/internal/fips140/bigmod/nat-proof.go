@@ -23,6 +23,7 @@ decreases
 pure func (c choice) isValid() bool {
 	return c == yes || c == no
 }
+
 ghost
 requires c.isValid()
 decreases
@@ -199,22 +200,35 @@ func NewNat() (n *Nat) {
 
 // expand expands x to n limbs, leaving its value unchanged.
 //@ trusted
-//@ preserves x.Inv()
-//@ ensures   x.AnnouncedLen() == n
-//@ ensures   x.Repr() == old(x.Repr())
+//@ requires x.Inv() && x.AnnouncedLen() <= n
+//@ ensures  x.Inv()
+//@ ensures  x.AnnouncedLen() == n
+//@ ensures  x.Repr() == old(x.Repr())
 func (x *Nat) expand(n int) *Nat {
+	//@ assert reveal x.AnnouncedLen() <= n
+	//@ xRepr := x.Repr()
+	//@ reveal x.Repr()
+	//@ unfold x.Inv()
 	if len(x.limbs) > n {
 		panic("bigmod: internal error: shrinking nat")
 	}
 	if cap(x.limbs) < n {
 		newLimbs := make([]uint, n)
-		copy(newLimbs, x.limbs)
+		copy(newLimbs, x.limbs /*@, perm(1/2) @*/)
+		//@ equalLimbsRepr(x.limbs, newLimbs, perm(1/2))
 		x.limbs = newLimbs
+		//@ fold x.Inv()
+		//@ assert reveal x.AnnouncedLen() == n
+		//@ assert reveal x.Repr() == xRepr
 		return x
 	}
+	// Note: this branch does not verify yet
 	extraLimbs := x.limbs[len(x.limbs):n]
 	clear(extraLimbs)
 	x.limbs = x.limbs[:n]
+	//@ fold x.Inv()
+	//@ assert reveal x.AnnouncedLen() == n
+	//@ assert reveal x.Repr() == xRepr
 	return x
 }
 
@@ -241,17 +255,29 @@ func clear(limbs []uint) {
 
 // reset returns a zero nat of n limbs, reusing x's storage if n <= cap(x.limbs).
 //@ trusted
+//@ requires  0 <= n
 //@ preserves x.Inv()
 //@ ensures   x == res
 //@ ensures   x.Repr() == 0
 //@ ensures   x.AnnouncedLen() == n
 func (x *Nat) reset(n int) (res *Nat) {
+	//@ reveal x.Repr()
+	//@ unfold x.Inv()
 	if cap(x.limbs) < n {
 		x.limbs = make([]uint, n)
+		//@ equalLimbsRepr([]uint{}, x.limbs, perm(1/2))
+		//@ fold x.Inv()
+		//@ assert reveal x.AnnouncedLen() == n
+		//@ assert reveal x.Repr() == 0
 		return x
 	}
 	clear(x.limbs)
+	//@ equalLimbsRepr([]uint{}, x.limbs, perm(1/2))
+	// Note: this branch does not verify yet
 	x.limbs = x.limbs[:n]
+	//@ fold x.Inv()
+	//@ assert reveal x.AnnouncedLen() == n
+	//@ assert reveal x.Repr() == 0
 	return x
 }
 
@@ -1498,7 +1524,7 @@ func natLen(n *Nat /*@, ghost p perm @*/) (res int) {
 	return
 }
 
-//@ trusted // because we cannot show `n.Repr() == 1`
+//@ trusted // TODO: can we verify this?
 //@ preserves n.Inv()
 //@ ensures   n.Repr() == 1
 //@ ensures   n.AnnouncedLen() == gmax(1, old(n.AnnouncedLen()))
