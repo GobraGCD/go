@@ -595,105 +595,101 @@ func modAddLemma(A, B, C, D, Ap, Bp, a, m int) {
 // A' = A + C, B' = B + D (no modular reduction needed).
 // B+D <= a follows from AC_lt_BD_le (called at call site).
 ghost
-requires relU(uOld, AOld, BOld, aVal, mVal)
-requires relV(vOld, COld, DOld, aVal, mVal)
-requires uNew == uOld - vOld
-requires uNew > 0
-requires aVal > 0 && mVal > 0
-requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
-requires ANew == AOld + COld
-requires BNew == BOld + DOld
-requires BNew <= aVal
-requires ANew < mVal
-ensures relU(uNew, ANew, BNew, aVal, mVal)
-ensures 0 <= ANew && ANew < mVal
-ensures 0 <= BNew && BNew <= aVal
+requires relU(u + v, A - C, B - D, a, m)
+requires relV(v, C, D, a, m)
+requires 0 < u && 0 < v && v < m // range for u, v
+requires 0 < a // range for a
+requires C <= A && A < m // range for A
+requires D <= B && B <= a + D // range for B
+requires 0 <= C && C < m // range for C
+requires 0 <= D && D <= a // range for D
+ensures relU(u, A, B, a, m)
+ensures B <= a
 decreases
-func subRelLemmaNoWrap(uOld, vOld, uNew, AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal int) {
-    subExpandLemma(uOld, vOld, AOld, BOld, COld, DOld, aVal, mVal)
-    reveal relU(uNew, ANew, BNew, aVal, mVal)
+func subRelLemmaNoWrap(u, v, A, B, C, D, a, m int) {
+	uOld := u + v
+	AOld := A - C
+	BOld := B - D
+	AC_lt_BD_le(uOld, v, AOld, BOld, C, D, a, m)
+	subExpandLemma(uOld, v, AOld, BOld, C, D, a, m)
+	assert reveal relU(u, A, B, a, m)
 }
 
 // Relational invariant maintenance for subtraction (u > v case), wrap:
 // A' = A + C - m, B' = B + D - a (synchronized subtraction).
 // B+D >= a is established by AC_ge_BD_ge (called at call site).
-// TODO: can likely prove the stronger bound BNew < aVal
 ghost
-requires relU(uOld, AOld, BOld, aVal, mVal)
-requires relV(vOld, COld, DOld, aVal, mVal)
-requires uNew == uOld - vOld
-requires aVal > 0 && mVal > 0
-requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
-requires ANew == AOld + COld - mVal
-requires BNew == BOld + DOld - aVal
-requires AOld + COld >= mVal
-requires BOld + DOld >= aVal
-ensures relU(uNew, ANew, BNew, aVal, mVal)
-ensures 0 <= ANew && ANew < mVal
-ensures 0 <= BNew && BNew <= aVal
+requires relU(u + v, A - C + m, B - D + a, a, m)
+requires relV(v, C, D, a, m)
+requires 0 < u && 0 <= v && u + v <= a // range for u, v
+requires 0 < a && a < m // range for a
+requires 0 <= A && A < C // range for A
+requires B <= D // range for B
+requires 0 <= C && C < m // range for C
+requires 0 <= D && D <= a // range for D
+ensures relU(u, A, B, a, m)
 decreases
-func subRelLemmaWrap(uOld, vOld, uNew, AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal int) {
-    subExpandLemma(uOld, vOld, AOld, BOld, COld, DOld, aVal, mVal)
-    // uNew == (AOld+COld)*aVal - (BOld+DOld)*mVal
-    modAddLemma(AOld, BOld, COld, DOld, ANew, BNew, aVal, mVal)
-    // (AOld+COld)*aVal - (BOld+DOld)*mVal == ANew*aVal - BNew*mVal
-    reveal relU(uNew, ANew, BNew, aVal, mVal)
+func subRelLemmaWrap(u, v, A, B, C, D, a, m int) {
+	uOld := u + v
+	AOld := A - C + m
+	BOld := B - D + a
+	AC_ge_BD_ge(uOld, v, AOld, BOld, C, D, a, m)
+	subExpandLemma(uOld, v, AOld, BOld, C, D, a, m)
+	// u == (AOld+C)*a - (BOld+D)*m
+	modAddLemma(AOld, BOld, C, D, A, B, a, m)
+	// (AOld+C)*a - (BOld+D)*m == A*a - B*m
+	assert reveal relU(u, A, B, a, m)
 }
 
 // Relational invariant maintenance for subtraction (v >= u case), no-wrap:
 // C' = C + A, D' = D + B (no modular reduction needed).
 // D+B <= a follows from AC_lt_BD_le (called at call site).
 ghost
-requires relU(uOld, AOld, BOld, aVal, mVal)
-requires relV(vOld, COld, DOld, aVal, mVal)
-requires vNew == vOld - uOld
-requires vNew >= 0
-requires aVal > 0 && mVal > 0
-requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
-requires CNew == COld + AOld
-requires DNew == DOld + BOld
-requires DNew <= aVal
-requires CNew < mVal
-ensures relV(vNew, CNew, DNew, aVal, mVal)
-ensures 0 <= CNew && CNew < mVal
-ensures 0 <= DNew && DNew <= aVal
+requires relU(u, A, B, a, m)
+requires relV(v + u, C - A, D - B, a, m)
+requires 0 < u && v + u <= m
+requires 0 < a
+requires 0 <= A && A < m // range of A
+requires 0 <= B && B <= D // range of B
+requires C < m // range of C
+ensures relV(v, C, D, a, m)
+ensures D <= a
 decreases
-func subRelLemma2NoWrap(uOld, vOld, vNew, AOld, BOld, COld, DOld, CNew, DNew, aVal, mVal int) {
-    subExpandLemma2(uOld, vOld, AOld, BOld, COld, DOld, aVal, mVal)
-    reveal relV(vNew, CNew, DNew, aVal, mVal)
+func subRelLemma2NoWrap(u, v, A, B, C, D, a, m int) {
+	vOld := v + u
+	COld := C - A
+	DOld := D - B
+	AC_lt_BD_le(u, vOld, A, B, COld, DOld, a, m)
+	subExpandLemma2(u, vOld, A, B, COld, DOld, a, m)
+	assert reveal relV(v, C, D, a, m)
 }
 
 // Relational invariant maintenance for subtraction (v >= u case), wrap:
 // C' = C + A - m, D' = D + B - a (synchronized subtraction).
-// D+B >= a is established by AC_ge_BD_ge (called at call site).
-// TODO: can likely prove the stronger bound DNew < aVal
 ghost
-requires relU(uOld, AOld, BOld, aVal, mVal)
-requires relV(vOld, COld, DOld, aVal, mVal)
-requires vNew == vOld - uOld
-requires aVal > 0 && mVal > 0
-requires 0 <= AOld && AOld < mVal && 0 <= COld && COld < mVal
-requires 0 <= BOld && BOld <= aVal && 0 <= DOld && DOld <= aVal
-requires CNew == COld + AOld - mVal
-requires DNew == DOld + BOld - aVal
-requires COld + AOld >= mVal
-requires DOld + BOld >= aVal
-ensures relV(vNew, CNew, DNew, aVal, mVal)
-ensures 0 <= CNew && CNew < mVal
-ensures 0 <= DNew && DNew <= aVal
+requires relU(u, A, B, a, m)
+requires relV(v + u, C - A + m, D - B + a, a, m)
+requires 0 < a && a < m // range of a
+requires 0 <= v + u && u <= a
+requires A < m // range of A
+requires 0 <= C && C < A // range of C
+requires 0 <= D && D <= B // range of D
+requires 0 <= B && B <= a // range of B
+ensures relV(v, C, D, a, m)
 decreases
-func subRelLemma2Wrap(uOld, vOld, vNew, AOld, BOld, COld, DOld, CNew, DNew, aVal, mVal int) {
-    subExpandLemma2(uOld, vOld, AOld, BOld, COld, DOld, aVal, mVal)
-    // vNew == (DOld+BOld)*mVal - (COld+AOld)*aVal
-    // With DNew = DOld+BOld-aVal and CNew = COld+AOld-mVal:
-    // (DOld+BOld)*mVal == (DNew+aVal)*mVal, (COld+AOld)*aVal == (CNew+mVal)*aVal
-    distLemma(DNew, aVal, mVal)  // (DNew+aVal)*mVal == DNew*mVal + aVal*mVal
-    distLemma(CNew, mVal, aVal)  // (CNew+mVal)*aVal == CNew*aVal + mVal*aVal
-    // Z3: vNew == DNew*mVal + aVal*mVal - CNew*aVal - mVal*aVal == DNew*mVal - CNew*aVal
-    reveal relV(vNew, CNew, DNew, aVal, mVal)
+func subRelLemma2Wrap(u, v, A, B, C, D, a, m int) {
+	vOld := v + u
+	COld := C - A + m
+	DOld := D - B + a
+	AC_ge_BD_ge(u, vOld, A, B, COld, DOld, a, m)
+	subExpandLemma2(u, vOld, A, B, COld, DOld, a, m)
+	// v == (DOld+B)*m - (COld+A)*a
+	// With D = DOld+B-a and C = COld+A-m:
+	// (DOld+B)*m == (D+a)*m, (COld+A)*a == (C+m)*a
+	distLemma(D, a, m)  // (D+a)*m == D*m + a*m
+	distLemma(C, m, a)  // (C+m)*a == C*a + m*a
+	// Z3: v == D*m + a*m - C*a - m*a == D*m - C*a
+	assert reveal relV(v, C, D, a, m)
 }
 
 // AC_ge_BD_ge: When A+C >= m, then B+D >= a. (Matches fiat-crypto's AC_ge_BD_ge.)
@@ -701,8 +697,9 @@ func subRelLemma2Wrap(uOld, vOld, vNew, AOld, BOld, COld, DOld, CNew, DNew, aVal
 // And u-v <= u <= a. So (B+D)*m >= m*a - a = a*(m-1).
 // If B+D <= a-1: (a-1)*m >= a*(m-1), giving a >= m. Contradicts a < m.
 //
-// TODO: For the v >= u case, the a < m condition could potentially be dropped
-// (since v >= u gives u-v <= 0, making (B+D)*m >= m*a directly).
+// Note: For the v >= u case, the a < m condition is not needed
+// (since v >= u gives (B+D)*m = (A+C)*a + (v-u) >= m*a directly).
+// We keep the single lemma with a < m since it's an invariant anyway.
 //
 // Lean 4:
 @*//*
@@ -733,7 +730,7 @@ requires relV(v, C, D, a, m)
 requires u <= a && 0 <= v
 requires A + C >= m
 requires 0 < a && a < m && 0 < m
-ensures B + D >= a
+ensures  B + D >= a
 decreases
 func AC_ge_BD_ge(u, v, A, B, C, D, a, m int)
 
@@ -774,7 +771,7 @@ requires relV(v, C, D, a, m)
 requires 0 < u && v <= m
 requires A + C < m
 requires 0 < a && 0 < m
-ensures B + D <= a
+ensures  B + D <= a
 decreases
 func AC_lt_BD_le(u, v, A, B, C, D, a, m int)
 
@@ -797,38 +794,41 @@ func parityLemma(u, A, B, a, m int) {
 
 // Relational invariant maintenance for halving u:
 ghost
-requires relU(uOld, AOld, BOld, aVal, mVal)
-requires uOld % 2 == 0
-requires uNew == uOld / 2
-requires AOld % 2 == 0 && BOld % 2 == 0 ==> (ANew == AOld / 2 && BNew == BOld / 2)
-requires (AOld % 2 != 0 || BOld % 2 != 0) ==> (ANew == (AOld + mVal) / 2 && BNew == (BOld + aVal) / 2)
-requires (AOld % 2 != 0 || BOld % 2 != 0) ==> (AOld + mVal) % 2 == 0 && (BOld + aVal) % 2 == 0
-requires 0 <= AOld && AOld < mVal && mVal > 0
-requires 0 <= BOld && BOld <= aVal && aVal > 0
-ensures relU(uNew, ANew, BNew, aVal, mVal)
-ensures 0 <= ANew && ANew < mVal
-ensures 0 <= BNew && BNew <= aVal // TODO: can likely prove stronger BNew < aVal
+requires relU(u * 2, A * 2, B * 2, a, m)
+requires 0 < u
+requires 0 <= A && A * 2 < m // range for A
+requires 0 <= B && B * 2 <= a // range for B
+ensures relU(u, A, B, a, m)
 decreases
-func halvRelLemmaU(uOld, uNew, AOld, BOld, ANew, BNew, aVal, mVal int) {
-    reveal relU(uOld, AOld, BOld, aVal, mVal)
-    // Z3 knows: uOld == AOld * aVal - BOld * mVal, uOld is even
-    if AOld % 2 == 0 && BOld % 2 == 0 {
-        // Even case: ANew = AOld/2, BNew = BOld/2
-        assert AOld == 2 * ANew
-        assert BOld == 2 * BNew
-        distLemma(ANew, ANew, aVal)
-        distLemma(BNew, BNew, mVal)
-    } else {
-        // Odd case: ANew = (AOld+mVal)/2, BNew = (BOld+aVal)/2
-        // Precondition gives (AOld+mVal) and (BOld+aVal) are even
-        assert (AOld + mVal) == 2 * ANew
-        assert (BOld + aVal) == 2 * BNew
-        distLemma(ANew, ANew, aVal)
-        distLemma(BNew, BNew, mVal)
-        distLemma(AOld, mVal, aVal)
-        distLemma(BOld, aVal, mVal)
-    }
-    reveal relU(uNew, ANew, BNew, aVal, mVal)
+func halvRelLemmaU1(u, A, B, a, m int) {
+	uOld := u * 2
+	AOld := A * 2
+	BOld := B * 2
+	assert reveal relU(uOld, AOld, BOld, a, m)
+	distLemma(A, A, a)
+	distLemma(B, B, m)
+	assert reveal relU(u, A, B, a, m)
+}
+
+ghost
+requires relU(u * 2, A * 2 - m, B * 2 - a, a, m)
+requires 0 < u
+requires 0 < m && A < m && m <= A * 2 // range for m
+requires 0 < a && B <= a && a <= B * 2 // range for a
+ensures relU(u, A, B, a, m)
+ensures 0 <= A
+ensures 0 <= B && B < a
+decreases
+func halvRelLemmaU2(u, A, B, a, m int) {
+	uOld := u * 2
+	AOld := A * 2 - m
+	BOld := B * 2 - a
+	assert reveal relU(uOld, AOld, BOld, a, m)
+	distLemma(A, A, a)
+	distLemma(B, B, m)
+	distLemma(AOld, m, a)
+	distLemma(BOld, a, m)
+	assert reveal relU(u, A, B, a, m)
 }
 
 // Parity lemma for v: when v = D*m - C*a is even and C or D is odd,
@@ -882,6 +882,65 @@ func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int) {
         distLemma(DOld, aVal, mVal)
     }
     reveal relV(vNew, CNew, DNew, aVal, mVal)
+}
+ghost
+requires relV(v * 2, C * 2, D * 2, a, m)
+requires 0 < a
+requires 0 <= C && C * 2 < m // range for C
+requires 0 <= D && D * 2 <= a // range for D
+ensures relV(v, C, D, a, m)
+decreases
+func halvRelLemmaV1(v, C, D, a, m int) {
+	vOld := v * 2
+	COld := C * 2
+	DOld := D * 2
+	assert reveal relV(vOld, COld, DOld, a, m)
+	assert COld == 2 * C
+	assert DOld == 2 * D
+	distLemma(C, C, a)
+	distLemma(D, D, m)
+	assert reveal relV(v, C, D, a, m)
+}
+
+ghost
+requires relV(v * 2, C * 2 - m, D * 2 - a, a, m)
+requires 0 < m
+requires C < m && m <= C * 2 // range for m
+requires 0 < a && D <= a && a <= D * 2 // range for a
+ensures relV(v, C, D, a, m)
+ensures 0 <= C
+ensures 0 <= D
+decreases
+func halvRelLemmaV2(v, C, D, a, m int) {
+	vOld := v * 2
+	COld := C * 2 - m
+	DOld := D * 2 - a
+	assert reveal relV(vOld, COld, DOld, a, m)
+	distLemma(C, C, a)
+	distLemma(D, D, m)
+	distLemma(COld, m, a)
+	distLemma(DOld, a, m)
+	assert reveal relV(v, C, D, a, m)
+}
+
+// BStrictBound: B < a follows from u > 0, A < m, a > 0, and u = A*a - B*m.
+// This is strictly stronger than fiat-crypto's bound B ≤ a (BinaryExtendedGCD.v).
+// Proof: by contradiction. If B ≥ a, then B*m ≥ a*m (m > 0).
+// From u = A*a - B*m > 0: A*a > B*m ≥ a*m, so A*a > a*m.
+// Since a > 0: A > m. But A < m. Contradiction.
+//
+// The asymmetry with D (where D = a is achievable) comes from u > 0 (strict)
+// vs v ≥ 0 (non-strict): setting D = a, C = 0 gives v = a*m > 0, which is valid.
+// But setting B = a, A = 0 gives u = -a*m < 0, violating u > 0.
+ghost
+requires relU(u, A, B, a, m)
+requires 0 < u
+requires 0 <= A && A < m
+requires a > 0 && m > 0
+ensures B < a
+decreases
+func BStrictBound(u, A, B, a, m int) {
+    reveal relU(u, A, B, a, m)
 }
 @*/
 
@@ -1044,10 +1103,16 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ invariant acc(mMod.Inv(), p/2) && mMod.IsNatOnly()
 	//@ invariant acc(aMod.Inv(), p/2) && aMod.IsNatOnly()
 	// Bounds:
-	//@ invariant mMod.Repr() > 0 && aMod.Repr() > 0
+	//@ invariant 0 < a.Repr() && 0 < m.Repr()
 	//@ invariant mMod.Repr() == m.Repr() && aMod.Repr() == a.Repr()
-	//@ invariant a.Repr() > 0 && m.Repr() > 0
 	//@ invariant a.Repr() < m.Repr()
+	//@ invariant 0 < u.Repr() && u.Repr() <= a.Repr() // range for u
+	//@ invariant 0 <= v.Repr() && v.Repr() <= m.Repr() // range for v
+	//@ invariant 0 <= A.Repr() && A.Repr() < m.Repr() // range for A
+	//@ invariant 0 <= B.Repr() && B.Repr() < a.Repr() // range for B; stronger than fiat-crypto's B ≤ a
+	//@ invariant 0 <= C.Repr() && C.Repr() < m.Repr() // range for C
+	//@ invariant 0 <= D.Repr() && D.Repr() <= a.Repr() // range for D
+	// Parity: at least one of a,m is odd:
 	//@ invariant a.Repr() % 2 == 1 || m.Repr() % 2 == 1
 	// Parity: at least one of u,v is odd (since gcd is odd).
 	//@ invariant u.Repr() % 2 == 1 || v.Repr() % 2 == 1
@@ -1055,100 +1120,75 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	// Relational invariants (abstract to avoid NIA):
 	//@ invariant relU(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
 	//@ invariant relV(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
-	// Bound invariants:
-	//@ invariant 0 < u.Repr() && u.Repr() <= a.Repr()
-	//@ invariant 0 <= v.Repr() && v.Repr() <= m.Repr()
-	//@ invariant 0 <= A.Repr() && A.Repr() < m.Repr()
-	//@ invariant 0 <= B.Repr() && B.Repr() <= a.Repr() // TODO: can likely prove stronger B < a
-	//@ invariant 0 <= C.Repr() && C.Repr() < m.Repr()
-	//@ invariant 0 <= D.Repr() && D.Repr() <= a.Repr()
 	//@ decreases u.Repr() + v.Repr()
 	for {
-		//@ oldSum := u.Repr() + v.Repr()
 		// If both u and v are odd, subtract the smaller from the larger.
 		// If u = v, we need to subtract from v to hit the modified exit condition.
 		if u.IsOdd(/*@ p / 2 @*/) == yes && v.IsOdd(/*@ p / 2 @*/) == yes {
 			if v.cmpGeq(u /*@, p / 4 @*/) == no {
 				//@ preU := u.Repr()
-				//@ preV := v.Repr()
-				//@ preA := A.Repr()
-				//@ preB := B.Repr()
-				//@ preC := C.Repr()
-				//@ preD := D.Repr()
 				u.sub(v /*@, p / 2 @*/)
-				//@ gcdSubLemma(preU, preV)
+				//@ gcdSubLemma(preU, v.Repr())
 				A.add(C /*@, p / 4 @*/)
 				B.add(D /*@, p / 4 @*/)
 				if A.cmpGeq(m /*@, p / 4 @*/) == yes {
-					//@ AC_ge_BD_ge(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
 					A.sub(m /*@, p / 4 @*/)
 					B.sub(a /*@, p / 4 @*/)
-					//@ subRelLemmaWrap(preU, preV, u.Repr(), preA, preB, preC, preD, A.Repr(), B.Repr(), a.Repr(), m.Repr())
+					//@ subRelLemmaWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				} else {
-					//@ AC_lt_BD_le(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
-					//@ subRelLemmaNoWrap(preU, preV, u.Repr(), preA, preB, preC, preD, A.Repr(), B.Repr(), a.Repr(), m.Repr())
+					//@ subRelLemmaNoWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				}
 			} else {
-				//@ preU := u.Repr()
 				//@ preV := v.Repr()
-				//@ preA := A.Repr()
-				//@ preB := B.Repr()
-				//@ preC := C.Repr()
-				//@ preD := D.Repr()
 				v.sub(u /*@, p / 2 @*/)
-				//@ gcdSubLemma2(preU, preV)
+				//@ gcdSubLemma2(u.Repr(), preV)
 				C.add(A /*@, p / 4 @*/)
 				D.add(B /*@, p / 4 @*/)
 				if C.cmpGeq(m /*@, p / 4 @*/) == yes {
-					//@ AC_ge_BD_ge(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
 					C.sub(m /*@, p / 4 @*/)
 					D.sub(a /*@, p / 4 @*/)
-					//@ subRelLemma2Wrap(preU, preV, v.Repr(), preA, preB, preC, preD, C.Repr(), D.Repr(), a.Repr(), m.Repr())
+					//@ subRelLemma2Wrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				} else {
-					//@ AC_lt_BD_le(preU, preV, preA, preB, preC, preD, a.Repr(), m.Repr())
-					//@ subRelLemma2NoWrap(preU, preV, v.Repr(), preA, preB, preC, preD, C.Repr(), D.Repr(), a.Repr(), m.Repr())
+					//@ subRelLemma2NoWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				}
 			}
 		}
 
 		// Exactly one of u and v is now even.
 		if u.IsOdd(/*@ p / 2 @*/) == v.IsOdd(/*@ p / 2 @*/) {
+			// this branch is unreachable -- good!
 			panic("bigmod: internal error: u and v are not in the expected state")
 		}
 
 		// Halve the even one and adjust the corresponding coefficient.
 		if u.IsOdd(/*@ p / 2 @*/) == no {
 			//@ preU := u.Repr()
-			//@ preV := v.Repr()
-			//@ preA := A.Repr()
-			//@ preB := B.Repr()
 			rshift1(u, 0)
-			//@ gcdHalfLemma(preU, preV)
+			//@ gcdHalfLemma(preU, v.Repr())
 			if A.IsOdd(/*@ p / 2 @*/) == yes || B.IsOdd(/*@ p / 2 @*/) == yes {
-				//@ parityLemma(preU, preA, preB, a.Repr(), m.Repr())
+				//@ parityLemma(preU, A.Repr(), B.Repr(), a.Repr(), m.Repr())
 				rshift1(A, A.add(m /*@, p / 4 @*/))
 				rshift1(B, B.add(a /*@, p / 4 @*/))
+				//@ halvRelLemmaU2(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
 			} else {
 				rshift1(A, 0)
 				rshift1(B, 0)
+				//@ halvRelLemmaU1(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
 			}
-			//@ halvRelLemmaU(preU, u.Repr(), preA, preB, A.Repr(), B.Repr(), a.Repr(), m.Repr())
 		} else { // v.IsOdd() == no
-			//@ preU := u.Repr()
 			//@ preV := v.Repr()
-			//@ preC := C.Repr()
-			//@ preD := D.Repr()
 			rshift1(v, 0)
-			//@ gcdHalfLemma2(preU, preV)
+			//@ gcdHalfLemma2(u.Repr(), preV)
 			if C.IsOdd(/*@ p / 2 @*/) == yes || D.IsOdd(/*@ p / 2 @*/) == yes {
-				//@ parityLemmaV(preV, preC, preD, a.Repr(), m.Repr())
+				//@ parityLemmaV(preV, C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				rshift1(C, C.add(m /*@, p / 4 @*/))
 				rshift1(D, D.add(a /*@, p / 4 @*/))
+				//@ halvRelLemmaV2(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 			} else {
 				rshift1(C, 0)
 				rshift1(D, 0)
+				//@ halvRelLemmaV1(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 			}
-			//@ halvRelLemmaV(preV, v.Repr(), preC, preD, C.Repr(), D.Repr(), a.Repr(), m.Repr())
 		}
 
 		if v.IsZero(/*@ p / 2 @*/) == yes {
