@@ -17,6 +17,38 @@ const (
 // constant time by turning it into a mask.
 type choice uint
 
+/*@
+ghost
+decreases
+pure func (c choice) isValid() bool {
+	return c == yes || c == no
+}
+ghost
+requires c.isValid()
+decreases
+pure func (c choice) Repr() bool {
+	return c == yes
+}
+@*/
+
+//@ trusted
+//@ requires c.isValid()
+//@ ensures  r.isValid() && r.Repr() == !c.Repr()
+//@ decreases
+//@ pure
+func not(c choice) (r choice) {
+	return 1 ^ c
+}
+
+//@ trusted // trusted because Gobra does not yet reason about bitwise operations
+//@ requires a.isValid() && b.isValid()
+//@ ensures  r.isValid() && r.Repr() == (a.Repr() || b.Repr())
+//@ decreases
+//@ pure
+func or(a, b choice) (r choice) {
+	return a | b
+}
+
 const yes = choice(1)
 const no = choice(0)
 
@@ -35,13 +67,32 @@ opaque
 requires acc(n.Inv(), _)
 ensures  0 <= res
 decreases
+pure func (n *Nat) AnnouncedLen() (res int) {
+	return unfolding acc(n.Inv(), _) in len(n.limbs)
+}
+
+ghost
+requires acc(n.Inv(), _)
+decreases
+// The number of values representable by n's limbs.
+pure func (n *Nat) ValCount() (res int) {
+	return unfolding acc(n.Inv(), _) in exp(2, _W * n.AnnouncedLen())
+}
+
+ghost
+opaque
+requires acc(n.Inv(), _)
+ensures  0 <= res && res < n.ValCount()
+decreases
 pure func (n *Nat) Repr() (res int) {
-	return unfolding acc(n.Inv(), _) in limbsRepr(n.limbs)
+	// TODO: is it a good idea to reveal within a pure function?
+	return let _ := reveal n.AnnouncedLen() in
+		unfolding acc(n.Inv(), _) in limbsRepr(n.limbs)
 }
 
 ghost
 requires acc(limbs, _)
-ensures  0 <= res
+ensures  0 <= res && res < exp(2, _W * len(limbs))
 decreases
 pure func limbsRepr(limbs []uint) (res int)
 
@@ -54,14 +105,6 @@ ensures  acc(limbs1, p) && acc(limbs2, p)
 ensures  limbsRepr(limbs1) == limbsRepr(limbs2)
 decreases
 func equalLimbsRepr(limbs1, limbs2 []uint, p perm)
-
-ghost
-opaque
-requires acc(n.Inv(), _)
-decreases
-pure func (n *Nat) AnnouncedLen() (res int) {
-	return unfolding acc(n.Inv(), _) in len(n.limbs)
-}
 @*/
 
 // preallocTarget is the size in bits of the numbers used to implement the most
@@ -74,12 +117,13 @@ const preallocLimbs = (preallocTarget + _W - 1) / _W
 // the preallocated capacity to hold a number of up to preallocTarget bits.
 // NewNat inlines, so the allocation can live on the stack.
 //@ ensures n.Inv()
-//@ ensures n.AnnouncedLen() == 0
+//@ ensures n.Repr() == 0 && n.AnnouncedLen() == 0
 func NewNat() (n *Nat) {
 	limbs := make([]uint, 0, preallocLimbs)
 	n = &Nat{limbs}
 	//@ fold n.Inv()
 	//@ assert reveal n.AnnouncedLen() == 0
+	//@ assert reveal exp(2, 0) == 1
 	return n
 }
 
@@ -217,6 +261,33 @@ func (x *Nat) IsOdd(/*@ ghost p perm @*/) (res choice) {
 	return choice(x.limbs[0] & 1)
 }
 
+// assign sets x <- y if on == 1, and does nothing otherwise.
+//
+// Both operands must have the same announced length.
+//
+//go:norace
+//@ trusted
+//@ requires noPerm < p
+//@ requires x.Inv() && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ requires on.isValid()
+//@ ensures  r == x
+//@ ensures  x.Inv() && acc(y.Inv(), p)
+//@ ensures  x.Repr() == (on.Repr() ? y.Repr() : old(x.Repr()))
+//@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+func (x *Nat) assign(on choice, y *Nat /*@, ghost p perm @*/) (r *Nat) {
+	// Eliminate bounds checks in the loop.
+	size := len(x.limbs)
+	xLimbs := x.limbs[:size]
+	yLimbs := y.limbs[:size]
+
+	mask := ctMask(on)
+	for i := 0; i < size; i++ {
+		xLimbs[i] ^= mask & (xLimbs[i] ^ yLimbs[i])
+	}
+	return x
+}
+
 // add computes x += y and returns the carry.
 //
 // Both operands must have the same announced length.
@@ -227,8 +298,10 @@ func (x *Nat) IsOdd(/*@ ghost p perm @*/) (res choice) {
 //@ requires x.Inv() && acc(y.Inv(), p)
 //@ requires x.AnnouncedLen() == y.AnnouncedLen()
 //@ ensures  x.Inv() && acc(y.Inv(), p)
-//@ ensures  x.Repr() == old(x.Repr()) + y.Repr()
 //@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+//@ ensures  0 <= c && c <= 1
+//@ ensures  x.Repr() == (old(x.Repr()) + y.Repr()) % old(x.ValCount())
+//@ ensures  (c == 0) == (old(x.Repr()) + y.Repr() < old(x.ValCount()))
 func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -241,6 +314,17 @@ func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 	return
 }
 
+/*@
+ghost
+opaque
+requires 0 <= e
+ensures  0 < b ==> 0 < r
+decreases e
+pure func exp(b, e int) (r int) {
+	return e == 0 ? 1 : b * exp(b, e - 1)
+}
+@*/
+
 // sub computes x -= y. It returns the borrow of the subtraction.
 //
 // Both operands must have the same announced length.
@@ -251,8 +335,10 @@ func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 //@ requires x.Inv() && acc(y.Inv(), p)
 //@ requires x.AnnouncedLen() == y.AnnouncedLen()
 //@ ensures  x.Inv() && acc(y.Inv(), p)
-//@ ensures  x.Repr() == old(x.Repr()) - y.Repr()
 //@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+//@ ensures  0 <= c && c <= 1
+//@ ensures  c == 0 ==> old(x.Repr()) >= y.Repr() && x.Repr() == old(x.Repr()) - y.Repr()
+//@ ensures  c == 1 ==> old(x.Repr()) < y.Repr() && x.Repr() == old(x.Repr()) - y.Repr() + old(x.ValCount())
 func (x *Nat) sub(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -303,17 +389,51 @@ pure func (m *Modulus) IsNatOnly() bool {
 ghost
 requires acc(m.Inv(), _)
 decreases
-pure func (m *Modulus) Repr() int {
-    return unfolding acc(m.Inv(), _) in m.nat.Repr()
+pure func (m *Modulus) AnnouncedLen() (res int) {
+	return unfolding acc(m.Inv(), _) in m.nat.AnnouncedLen()
 }
 
 ghost
 requires acc(m.Inv(), _)
 decreases
-pure func (m *Modulus) AnnouncedLen() (res int) {
-	return unfolding acc(m.Inv(), _) in m.nat.AnnouncedLen()
+pure func (m *Modulus) Repr() int {
+    return unfolding acc(m.Inv(), _) in m.nat.Repr()
 }
 @*/
+
+// maybeSubtractModulus computes x -= m if and only if x >= m or if "always" is yes.
+//
+// It can be used to reduce modulo m a value up to 2m - 1, which is a common
+// range for results computed by higher level operations.
+//
+// always is usually a carry that indicates that the operation that produced x
+// overflowed its size, meaning abstractly x > 2^_W*n > m even if x < m.
+//
+// x and m operands must have the same announced length.
+//
+//go:norace
+//@ requires noPerm < p
+//@ requires x.Inv() && acc(m.Inv(), p)
+//@ requires x.Repr() < 2*m.Repr()
+//@ requires x.AnnouncedLen() == m.AnnouncedLen()
+//@ requires always.isValid()
+//@ ensures  x.Inv() && acc(m.Inv(), p)
+//@ ensures  0 < m.Repr() // this is a direct consequence of the precondition but required to make `_ % m.Repr()` well-defined
+//@ ensures  always.Repr() ?
+//@		x.Repr() == (old(x.Repr()) >= m.Repr() ? old(x.Repr()) - m.Repr() : old(x.Repr()) - m.Repr() + x.ValCount()) :
+//@		x.Repr() == old(x.Repr()) % m.Repr()
+//@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+func (x *Nat) maybeSubtractModulus(always choice, m *Modulus /*@, ghost p perm @*/) {
+	t := NewNat().setNat(x /*@, 1/2 @*/)
+	assert t.Repr() == x.Repr() && t.AnnouncedLen() == x.AnnouncedLen()
+	//@ unfold acc(m.Inv(), p)
+	underflow := t.sub(m.nat /*@, p/2 @*/)
+	//@ fold acc(m.Inv(), p)
+	// We keep the result if x - m didn't underflow (meaning x >= m)
+	// or if always was set.
+	keep := or(not(choice(underflow)), choice(always))
+	x.assign(keep, t /*@, 1/2 @*/)
+}
 
 // Add computes x = x + y mod m.
 //
@@ -321,20 +441,18 @@ pure func (m *Modulus) AnnouncedLen() (res int) {
 // must already be reduced modulo m.
 //
 //go:norace
-//@ trusted
 //@ requires noPerm < p && noPerm < q
 //@ requires x.Inv() && acc(y.Inv(), p) && acc(m.Inv(), q)
 //@ requires x.AnnouncedLen() == m.AnnouncedLen() && y.AnnouncedLen() == m.AnnouncedLen()
-//@ requires m.Repr() > 0 // TODO: do we need this precondition?
 //@ requires 0 <= x.Repr() && x.Repr() < m.Repr()
 //@ requires 0 <= y.Repr() && y.Repr() < m.Repr()
+//@ ensures  r == x
 //@ ensures  x.Inv() && acc(y.Inv(), p) && acc(m.Inv(), q)
 //@ ensures  0 <= x.Repr() && x.Repr() < m.Repr()
-//@ ensures  old(x.Repr()) + y.Repr() < m.Repr() ==> x.Repr() == old(x.Repr()) + y.Repr()
-//@ ensures  old(x.Repr()) + y.Repr() >= m.Repr() ==> x.Repr() == old(x.Repr()) + y.Repr() - m.Repr()
-func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p, q perm @*/) *Nat {
-	overflow := x.add(y)
-	x.maybeSubtractModulus(choice(overflow), m)
+//@ ensures  x.Repr() == (old(x.Repr()) + y.Repr()) % m.Repr()
+func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p, q perm @*/) (r *Nat) {
+	overflow := x.add(y /*@, p/2 @*/)
+	x.maybeSubtractModulus(choice(overflow), m /*@, q/2 @*/)
 	return x
 }
 
