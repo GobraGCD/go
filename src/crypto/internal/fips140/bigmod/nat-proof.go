@@ -443,20 +443,13 @@ func gcdHalfLemma2(a, b int) {
     gcdCommLemma(b / 2, a) // gcd(b / 2, a) == gcd(a, b / 2)
 }
 
-// Opaque relational predicates. These hide the non-linear terms (products)
+// Opaque relational predicate. This hides the non-linear terms (products)
 // from Z3 to avoid NIA timeouts. Use `reveal` to open at specific points.
 ghost
 opaque
 decreases
-pure func relU(u, A, B, aVal, mVal int) bool {
+pure func nonLinearSub(u, A, B, aVal, mVal int) bool {
     return u == A * aVal - B * mVal
-}
-
-ghost
-opaque
-decreases
-pure func relV(v, C, D, aVal, mVal int) bool {
-    return v == D * mVal - C * aVal
 }
 
 // ===== Trusted lemmas =====================================================
@@ -525,26 +518,26 @@ func distLemma(a, b, c int) {
 // u = A*a - B*m and v = D*m - C*a imply u - v = (A+C)*a - (B+D)*m.
 // Isolates the reveal + distLemma NIA from later proof steps.
 ghost
-requires relU(u, A, B, a, m)
-requires relV(v, C, D, a, m)
+requires nonLinearSub(u, A, B, a, m)
+requires nonLinearSub(v, D, C, m, a)
 ensures u - v == (A + C) * a - (B + D) * m
 decreases
 func subExpandLemma(u, v, A, B, C, D, a, m int) {
-    reveal relU(u, A, B, a, m)
-    reveal relV(v, C, D, a, m)
+    reveal nonLinearSub(u, A, B, a, m)
+    reveal nonLinearSub(v, D, C, m, a)
     distLemma(A, C, a)
     distLemma(B, D, m)
 }
 
 // Expand v - u symmetrically: v - u = (D+B)*m - (C+A)*a.
 ghost
-requires relU(u, A, B, a, m)
-requires relV(v, C, D, a, m)
+requires nonLinearSub(u, A, B, a, m)
+requires nonLinearSub(v, D, C, m, a)
 ensures v - u == (D + B) * m - (C + A) * a
 decreases
 func subExpandLemma2(u, v, A, B, C, D, a, m int) {
-    reveal relU(u, A, B, a, m)
-    reveal relV(v, C, D, a, m)
+    reveal nonLinearSub(u, A, B, a, m)
+    reveal nonLinearSub(v, D, C, m, a)
     distLemma(C, A, a)
     distLemma(D, B, m)
 }
@@ -595,15 +588,15 @@ func modAddLemma(A, B, C, D, Ap, Bp, a, m int) {
 // A' = A + C, B' = B + D (no modular reduction needed).
 // B+D <= a follows from AC_lt_BD_le (called at call site).
 ghost
-requires relU(u + v, A - C, B - D, a, m)
-requires relV(v, C, D, a, m)
+requires nonLinearSub(u + v, A - C, B - D, a, m)
+requires nonLinearSub(v, D, C, m, a)
 requires 0 < u && 0 < v && v < m // range for u, v
 requires 0 < a // range for a
 requires C <= A && A < m // range for A
 requires D <= B && B <= a + D // range for B
 requires 0 <= C && C < m // range for C
 requires 0 <= D && D <= a // range for D
-ensures relU(u, A, B, a, m)
+ensures nonLinearSub(u, A, B, a, m)
 ensures B <= a
 decreases
 func subRelLemmaNoWrap(u, v, A, B, C, D, a, m int) {
@@ -612,22 +605,22 @@ func subRelLemmaNoWrap(u, v, A, B, C, D, a, m int) {
 	BOld := B - D
 	AC_lt_BD_le(uOld, v, AOld, BOld, C, D, a, m)
 	subExpandLemma(uOld, v, AOld, BOld, C, D, a, m)
-	assert reveal relU(u, A, B, a, m)
+	assert reveal nonLinearSub(u, A, B, a, m)
 }
 
 // Relational invariant maintenance for subtraction (u > v case), wrap:
 // A' = A + C - m, B' = B + D - a (synchronized subtraction).
 // B+D >= a is established by AC_ge_BD_ge (called at call site).
 ghost
-requires relU(u + v, A - C + m, B - D + a, a, m)
-requires relV(v, C, D, a, m)
+requires nonLinearSub(u + v, A - C + m, B - D + a, a, m)
+requires nonLinearSub(v, D, C, m, a)
 requires 0 < u && 0 <= v && u + v <= a // range for u, v
 requires 0 < a && a < m // range for a
 requires 0 <= A && A < C // range for A
 requires B <= D // range for B
 requires 0 <= C && C < m // range for C
 requires 0 <= D && D <= a // range for D
-ensures relU(u, A, B, a, m)
+ensures nonLinearSub(u, A, B, a, m)
 decreases
 func subRelLemmaWrap(u, v, A, B, C, D, a, m int) {
 	uOld := u + v
@@ -638,21 +631,21 @@ func subRelLemmaWrap(u, v, A, B, C, D, a, m int) {
 	// u == (AOld+C)*a - (BOld+D)*m
 	modAddLemma(AOld, BOld, C, D, A, B, a, m)
 	// (AOld+C)*a - (BOld+D)*m == A*a - B*m
-	assert reveal relU(u, A, B, a, m)
+	assert reveal nonLinearSub(u, A, B, a, m)
 }
 
 // Relational invariant maintenance for subtraction (v >= u case), no-wrap:
 // C' = C + A, D' = D + B (no modular reduction needed).
 // D+B <= a follows from AC_lt_BD_le (called at call site).
 ghost
-requires relU(u, A, B, a, m)
-requires relV(v + u, C - A, D - B, a, m)
+requires nonLinearSub(u, A, B, a, m)
+requires nonLinearSub(v + u, D - B, C - A, m, a)
 requires 0 < u && v + u <= m
 requires 0 < a
 requires 0 <= A && A < m // range of A
 requires 0 <= B && B <= D // range of B
 requires C < m // range of C
-ensures relV(v, C, D, a, m)
+ensures nonLinearSub(v, D, C, m, a)
 ensures D <= a
 decreases
 func subRelLemma2NoWrap(u, v, A, B, C, D, a, m int) {
@@ -661,21 +654,21 @@ func subRelLemma2NoWrap(u, v, A, B, C, D, a, m int) {
 	DOld := D - B
 	AC_lt_BD_le(u, vOld, A, B, COld, DOld, a, m)
 	subExpandLemma2(u, vOld, A, B, COld, DOld, a, m)
-	assert reveal relV(v, C, D, a, m)
+	assert reveal nonLinearSub(v, D, C, m, a)
 }
 
 // Relational invariant maintenance for subtraction (v >= u case), wrap:
 // C' = C + A - m, D' = D + B - a (synchronized subtraction).
 ghost
-requires relU(u, A, B, a, m)
-requires relV(v + u, C - A + m, D - B + a, a, m)
+requires nonLinearSub(u, A, B, a, m)
+requires nonLinearSub(v + u, D - B + a, C - A + m, m, a)
 requires 0 < a && a < m // range of a
 requires 0 <= v + u && u <= a
 requires A < m // range of A
 requires 0 <= C && C < A // range of C
 requires 0 <= D && D <= B // range of D
 requires 0 <= B && B <= a // range of B
-ensures relV(v, C, D, a, m)
+ensures nonLinearSub(v, D, C, m, a)
 decreases
 func subRelLemma2Wrap(u, v, A, B, C, D, a, m int) {
 	vOld := v + u
@@ -689,7 +682,7 @@ func subRelLemma2Wrap(u, v, A, B, C, D, a, m int) {
 	distLemma(D, a, m)  // (D+a)*m == D*m + a*m
 	distLemma(C, m, a)  // (C+m)*a == C*a + m*a
 	// Z3: v == D*m + a*m - C*a - m*a == D*m - C*a
-	assert reveal relV(v, C, D, a, m)
+	assert reveal nonLinearSub(v, D, C, m, a)
 }
 
 // AC_ge_BD_ge: When A+C >= m, then B+D >= a. (Matches fiat-crypto's AC_ge_BD_ge.)
@@ -725,8 +718,8 @@ func subRelLemma2Wrap(u, v, A, B, C, D, a, m int) {
 *//*@
 ghost
 trusted
-requires relU(u, A, B, a, m)
-requires relV(v, C, D, a, m)
+requires nonLinearSub(u, A, B, a, m)
+requires nonLinearSub(v, D, C, m, a)
 requires u <= a && 0 <= v
 requires A + C >= m
 requires 0 < a && a < m && 0 < m
@@ -766,8 +759,8 @@ func AC_ge_BD_ge(u, v, A, B, C, D, a, m int)
 *//*@
 ghost
 trusted
-requires relU(u, A, B, a, m)
-requires relV(v, C, D, a, m)
+requires nonLinearSub(u, A, B, a, m)
+requires nonLinearSub(v, D, C, m, a)
 requires 0 < u && v <= m
 requires A + C < m
 requires 0 < a && 0 < m
@@ -776,9 +769,9 @@ decreases
 func AC_lt_BD_le(u, v, A, B, C, D, a, m int)
 
 // Parity lemma: when u = A*a - B*m is even and A or B is odd,
-// then A+m and B+a are both even. Reveals relU only for parity reasoning.
+// then A+m and B+a are both even. Reveals nonLinearSub only for parity reasoning.
 ghost
-requires relU(u, A, B, a, m)
+requires nonLinearSub(u, A, B, a, m)
 requires u % 2 == 0
 requires A >= 0 && B >= 0 && a >= 0 && m >= 0
 requires a % 2 != 0 || m % 2 != 0
@@ -787,35 +780,35 @@ ensures (A + m) % 2 == 0
 ensures (B + a) % 2 == 0
 decreases
 func parityLemma(u, A, B, a, m int) {
-    reveal relU(u, A, B, a, m)
+    reveal nonLinearSub(u, A, B, a, m)
     prodParityLemma(A, a)
     prodParityLemma(B, m)
 }
 
 // Relational invariant maintenance for halving u:
 ghost
-requires relU(u * 2, A * 2, B * 2, a, m)
+requires nonLinearSub(u * 2, A * 2, B * 2, a, m)
 requires 0 < u
 requires 0 <= A && A * 2 < m // range for A
 requires 0 <= B && B * 2 <= a // range for B
-ensures relU(u, A, B, a, m)
+ensures nonLinearSub(u, A, B, a, m)
 decreases
 func halvRelLemmaU1(u, A, B, a, m int) {
 	uOld := u * 2
 	AOld := A * 2
 	BOld := B * 2
-	assert reveal relU(uOld, AOld, BOld, a, m)
+	assert reveal nonLinearSub(uOld, AOld, BOld, a, m)
 	distLemma(A, A, a)
 	distLemma(B, B, m)
-	assert reveal relU(u, A, B, a, m)
+	assert reveal nonLinearSub(u, A, B, a, m)
 }
 
 ghost
-requires relU(u * 2, A * 2 - m, B * 2 - a, a, m)
+requires nonLinearSub(u * 2, A * 2 - m, B * 2 - a, a, m)
 requires 0 < u
 requires 0 < m && A < m && m <= A * 2 // range for m
 requires 0 < a && B <= a && a <= B * 2 // range for a
-ensures relU(u, A, B, a, m)
+ensures nonLinearSub(u, A, B, a, m)
 ensures 0 <= A
 ensures 0 <= B && B < a
 decreases
@@ -823,18 +816,18 @@ func halvRelLemmaU2(u, A, B, a, m int) {
 	uOld := u * 2
 	AOld := A * 2 - m
 	BOld := B * 2 - a
-	assert reveal relU(uOld, AOld, BOld, a, m)
+	assert reveal nonLinearSub(uOld, AOld, BOld, a, m)
 	distLemma(A, A, a)
 	distLemma(B, B, m)
 	distLemma(AOld, m, a)
 	distLemma(BOld, a, m)
-	assert reveal relU(u, A, B, a, m)
+	assert reveal nonLinearSub(u, A, B, a, m)
 }
 
 // Parity lemma for v: when v = D*m - C*a is even and C or D is odd,
 // then C+m and D+a are both even.
 ghost
-requires relV(v, C, D, a, m)
+requires nonLinearSub(v, D, C, m, a)
 requires v % 2 == 0
 requires C >= 0 && D >= 0 && a >= 0 && m >= 0
 requires a % 2 != 0 || m % 2 != 0
@@ -843,71 +836,37 @@ ensures (C + m) % 2 == 0
 ensures (D + a) % 2 == 0
 decreases
 func parityLemmaV(v, C, D, a, m int) {
-    reveal relV(v, C, D, a, m)
+    reveal nonLinearSub(v, D, C, m, a)
     prodParityLemma(C, a)
     prodParityLemma(D, m)
 }
 
 // Relational invariant maintenance for halving v (mirrors halvRelLemmaU):
 ghost
-requires relV(vOld, COld, DOld, aVal, mVal)
-requires vOld % 2 == 0
-requires vNew == vOld / 2
-requires COld % 2 == 0 && DOld % 2 == 0 ==> (CNew == COld / 2 && DNew == DOld / 2)
-requires (COld % 2 != 0 || DOld % 2 != 0) ==> (CNew == (COld + mVal) / 2 && DNew == (DOld + aVal) / 2)
-requires (COld % 2 != 0 || DOld % 2 != 0) ==> (COld + mVal) % 2 == 0 && (DOld + aVal) % 2 == 0
-requires 0 <= COld && COld < mVal && mVal > 0
-requires 0 <= DOld && DOld <= aVal && aVal > 0
-ensures relV(vNew, CNew, DNew, aVal, mVal)
-ensures 0 <= CNew && CNew < mVal
-ensures 0 <= DNew && DNew <= aVal
-decreases
-func halvRelLemmaV(vOld, vNew, COld, DOld, CNew, DNew, aVal, mVal int) {
-    reveal relV(vOld, COld, DOld, aVal, mVal)
-    // Z3 knows: vOld == DOld * mVal - COld * aVal, vOld is even
-    if COld % 2 == 0 && DOld % 2 == 0 {
-        // Even case: CNew = COld/2, DNew = DOld/2
-        assert COld == 2 * CNew
-        assert DOld == 2 * DNew
-        distLemma(CNew, CNew, aVal)
-        distLemma(DNew, DNew, mVal)
-    } else {
-        // Odd case: CNew = (COld+mVal)/2, DNew = (DOld+aVal)/2
-        // Precondition gives (COld+mVal) and (DOld+aVal) are even
-        assert (COld + mVal) == 2 * CNew
-        assert (DOld + aVal) == 2 * DNew
-        distLemma(CNew, CNew, aVal)
-        distLemma(DNew, DNew, mVal)
-        distLemma(COld, mVal, aVal)
-        distLemma(DOld, aVal, mVal)
-    }
-    reveal relV(vNew, CNew, DNew, aVal, mVal)
-}
-ghost
-requires relV(v * 2, C * 2, D * 2, a, m)
+requires nonLinearSub(v * 2, D * 2, C * 2, m, a)
 requires 0 < a
 requires 0 <= C && C * 2 < m // range for C
 requires 0 <= D && D * 2 <= a // range for D
-ensures relV(v, C, D, a, m)
+ensures nonLinearSub(v, D, C, m, a)
 decreases
 func halvRelLemmaV1(v, C, D, a, m int) {
 	vOld := v * 2
 	COld := C * 2
 	DOld := D * 2
-	assert reveal relV(vOld, COld, DOld, a, m)
+	assert reveal nonLinearSub(vOld, DOld, COld, m, a)
 	assert COld == 2 * C
 	assert DOld == 2 * D
 	distLemma(C, C, a)
 	distLemma(D, D, m)
-	assert reveal relV(v, C, D, a, m)
+	assert reveal nonLinearSub(v, D, C, m, a)
 }
 
 ghost
-requires relV(v * 2, C * 2 - m, D * 2 - a, a, m)
+requires nonLinearSub(v * 2, D * 2 - a, C * 2 - m, m, a)
 requires 0 < m
 requires C < m && m <= C * 2 // range for m
 requires 0 < a && D <= a && a <= D * 2 // range for a
-ensures relV(v, C, D, a, m)
+ensures nonLinearSub(v, D, C, m, a)
 ensures 0 <= C
 ensures 0 <= D
 decreases
@@ -915,12 +874,12 @@ func halvRelLemmaV2(v, C, D, a, m int) {
 	vOld := v * 2
 	COld := C * 2 - m
 	DOld := D * 2 - a
-	assert reveal relV(vOld, COld, DOld, a, m)
+	assert reveal nonLinearSub(vOld, DOld, COld, m, a)
 	distLemma(C, C, a)
 	distLemma(D, D, m)
 	distLemma(COld, m, a)
 	distLemma(DOld, a, m)
-	assert reveal relV(v, C, D, a, m)
+	assert reveal nonLinearSub(v, D, C, m, a)
 }
 
 // BStrictBound: B < a follows from u > 0, A < m, a > 0, and u = A*a - B*m.
@@ -933,14 +892,14 @@ func halvRelLemmaV2(v, C, D, a, m int) {
 // vs v ≥ 0 (non-strict): setting D = a, C = 0 gives v = a*m > 0, which is valid.
 // But setting B = a, A = 0 gives u = -a*m < 0, violating u > 0.
 ghost
-requires relU(u, A, B, a, m)
+requires nonLinearSub(u, A, B, a, m)
 requires 0 < u
 requires 0 <= A && A < m
 requires a > 0 && m > 0
 ensures B < a
 decreases
 func BStrictBound(u, A, B, a, m int) {
-    reveal relU(u, A, B, a, m)
+    reveal nonLinearSub(u, A, B, a, m)
 }
 @*/
 
@@ -1072,10 +1031,10 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ fold acc(aMod.Inv(), p/2)
 
 	// Establish relational invariants:
-	// u = a = 1*a - 0*m, so relU(a, 1, 0, a, m) holds.
-	// v = m = 1*m - 0*a, so relV(m, 0, 1, a, m) holds.
-	//@ assert reveal relU(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
-	//@ assert reveal relV(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+	// u = a = 1*a - 0*m, so nonLinearSub(a, 1, 0, a, m) holds.
+	// v = m = 1*m - 0*a, so nonLinearSub(m, 1, 0, m, a) holds.
+	//@ assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+	//@ assert reveal nonLinearSub(v.Repr(), D.Repr(), C.Repr(), m.Repr(), a.Repr())
 
 	// Before and after each loop iteration, the following hold:
 	//
@@ -1118,8 +1077,8 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ invariant u.Repr() % 2 == 1 || v.Repr() % 2 == 1
 	//@ invariant gcd(u.Repr(), v.Repr()) == gcd(a.Repr(), m.Repr())
 	// Relational invariants (abstract to avoid NIA):
-	//@ invariant relU(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
-	//@ invariant relV(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+	//@ invariant nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+	//@ invariant nonLinearSub(v.Repr(), D.Repr(), C.Repr(), m.Repr(), a.Repr())
 	//@ decreases u.Repr() + v.Repr()
 	for {
 		// If both u and v are odd, subtract the smaller from the larger.
@@ -1196,7 +1155,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 			//@ gcdBaseLemma(u.Repr())
 			// Open the opaque relational invariant to get the actual equation
 			// for the postcondition: u = A*a - B*m.
-			//@ assert reveal relU(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+			//@ assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
 			//@ unfold acc(mMod.Inv(), p/2)
 			//@ unfold acc(aMod.Inv(), p/2)
 			return u, A, nil /*@, B.Repr() @*/
