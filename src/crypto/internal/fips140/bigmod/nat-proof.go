@@ -1082,6 +1082,11 @@ func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
 // is used to detect overflow: if carry == 1 || X >= bound1, we subtract.
 // In the overflow+borrow case, ValCount cancels: X+Y-VC-bound1+VC = X+Y-bound1.
 //
+// The ghost parameters U, V, A, B, C, D represent the relational
+// context from the extended GCD loop. syncAdd proves the synchronized
+// wrap/no-wrap property internally via AC_ge_BD_ge / AC_lt_BD_le, and
+// maintains nonLinearSub through the addition.
+//
 //go:norace
 //@ requires noPerm < p && p <= writePerm
 //@ requires X.Inv() && Z.Inv()
@@ -1091,8 +1096,18 @@ func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
 //@ requires Z.AnnouncedLen() == W.AnnouncedLen() && Z.AnnouncedLen() == bound2.AnnouncedLen()
 //@ requires X.Repr() < bound1.Repr() && Y.Repr() < bound1.Repr() // sum < 2*bound1
 //@ requires Z.Repr() <= bound2.Repr() && W.Repr() <= bound2.Repr() // sum <= 2*bound2
-//@ requires X.Repr() + Y.Repr() >= bound1.Repr() ==> Z.Repr() + W.Repr() >= bound2.Repr()
-//@ requires X.Repr() + Y.Repr() <  bound1.Repr() ==> Z.Repr() + W.Repr() <= bound2.Repr()
+// Ghost relational preconditions:
+//@ requires A + C == X.Repr() + Y.Repr()
+//@ requires B + D == Z.Repr() + W.Repr()
+//@ requires nonLinearSub(U, A, B, bound2.Repr(), bound1.Repr())
+//@ requires nonLinearSub(V, D, C, bound1.Repr(), bound2.Repr())
+//@ requires 0 < U && U <= bound2.Repr()
+//@ requires 0 <= V && V <= bound1.Repr()
+//@ requires 0 < bound2.Repr() && bound2.Repr() < bound1.Repr()
+//@ requires 0 <= A && A < bound1.Repr()
+//@ requires 0 <= C && C < bound1.Repr()
+//@ requires 0 <= B && B <= bound2.Repr()
+//@ requires 0 <= D && D <= bound2.Repr()
 //@ ensures  X.Inv() && Z.Inv()
 //@ ensures  acc(Y.Inv(), p) && acc(W.Inv(), p)
 //@ ensures  acc(bound1.Inv(), p) && acc(bound2.Inv(), p)
@@ -1102,7 +1117,22 @@ func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
 //@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr() - bound1.Repr()
 //@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr()
 //@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr() - bound2.Repr()
-func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost p perm @*/) {
+// Ghost relational postconditions:
+//@ ensures  nonLinearSub(U - V, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+//@ ensures  nonLinearSub(V - U, Z.Repr(), X.Repr(), bound1.Repr(), bound2.Repr())
+// Sync facts (for range reasoning at call sites):
+//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> old(Z.Repr()) + W.Repr() <= bound2.Repr()
+//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> old(Z.Repr()) + W.Repr() >= bound2.Repr()
+func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D int, ghost p perm @*/) {
+	// Establish sync preconditions from nonLinearSub via AC_ge_BD_ge / AC_lt_BD_le:
+	/*@
+	ghost if A + C >= bound1.Repr() {
+		AC_ge_BD_ge(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+	} else {
+		AC_lt_BD_le(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+	}
+	@*/
+
 	c := X.add(Y /*@, p / 2 @*/)
 	Z.add(W /*@, p / 2 @*/)
 	// After add: X.Repr() is either xOld+Y (c==0) or xOld+Y-VC (c==1).
@@ -1113,7 +1143,7 @@ func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost p perm @*/) {
 		// Case c==1: add overflowed, so xOld+Y >= VC > bound1.
 		// Case c==0, cmpGeq==yes: X.Repr() = xOld+Y >= bound1.
 		//@ assert old(X.Repr()) + Y.Repr() >= bound1.Repr()
-		// From sync precondition:
+		// From sync property (proven by AC_ge_BD_ge above):
 		//@ assert old(Z.Repr()) + W.Repr() >= bound2.Repr()
 
 		X.sub(bound1 /*@, p / 2 @*/)
@@ -1126,6 +1156,20 @@ func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost p perm @*/) {
 		//   Z.add overflowed: Z_after_add = zOld+W-VC < bound2 (since zOld+W <= 2*bound2, VC > bound2),
 		//     sub borrows: zOld+W-VC-bound2+VC = zOld+W-bound2.
 	}
+
+	// Prove nonLinearSub postconditions:
+	// subExpandLemma: U - V = (A + C) * bound2 - (B + D) * bound1
+	//@ subExpandLemma(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+	// In the wrap case, modAddLemma bridges:
+	//   (A + C) * bound2 - (B + D) * bound1 = X.Repr() * bound2 - Z.Repr() * bound1
+	// In the no-wrap case, X.Repr() = A + C and Z.Repr() = B + D, so the equation holds trivially.
+	/*@
+	ghost if old(X.Repr()) + Y.Repr() >= bound1.Repr() {
+		modAddLemma(A, B, C, D, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+	}
+	@*/
+	//@ assert reveal nonLinearSub(U - V, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+	//@ assert reveal nonLinearSub(V - U, Z.Repr(), X.Repr(), bound1.Repr(), bound2.Repr())
 }
 
 // extendedGCD computes u and A such that u = GCD(a, m) and u = A*a - B*m.
@@ -1259,48 +1303,14 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 		if u.IsOdd(/*@ p / 2 @*/) == yes && v.IsOdd(/*@ p / 2 @*/) == yes {
 			if v.cmpGeq(u /*@, p / 4 @*/) == no {
 				//@ preU := u.Repr()
-				//@ preA := A.Repr()
-				//@ preB := B.Repr()
 				u.sub(v /*@, p / 2 @*/)
 				//@ gcdSubLemma(preU, v.Repr())
-				// Establish sync preconditions for syncAdd using AC_ge_BD_ge / AC_lt_BD_le:
-				/*@
-				ghost if preA + C.Repr() >= m.Repr() {
-					AC_ge_BD_ge(preU, v.Repr(), preA, preB, C.Repr(), D.Repr(), a.Repr(), m.Repr())
-				} else {
-					AC_lt_BD_le(preU, v.Repr(), preA, preB, C.Repr(), D.Repr(), a.Repr(), m.Repr())
-				}
-				@*/
-				syncAdd(A, C, B, D, m, a /*@, p / 4 @*/)
-				/*@
-				ghost if preA + C.Repr() >= m.Repr() {
-					subRelLemmaWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
-				} else {
-					subRelLemmaNoWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
-				}
-				@*/
+				syncAdd(A, C, B, D, m, a /*@, preU, v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), p / 4 @*/)
 			} else {
 				//@ preV := v.Repr()
-				//@ preC := C.Repr()
-				//@ preD := D.Repr()
 				v.sub(u /*@, p / 2 @*/)
 				//@ gcdSubLemma2(u.Repr(), preV)
-				// Establish sync preconditions for syncAdd using AC_ge_BD_ge / AC_lt_BD_le:
-				/*@
-				ghost if preC + A.Repr() >= m.Repr() {
-					AC_ge_BD_ge(u.Repr(), preV, A.Repr(), B.Repr(), preC, preD, a.Repr(), m.Repr())
-				} else {
-					AC_lt_BD_le(u.Repr(), preV, A.Repr(), B.Repr(), preC, preD, a.Repr(), m.Repr())
-				}
-				@*/
-				syncAdd(C, A, D, B, m, a /*@, p / 4 @*/)
-				/*@
-				ghost if preC + A.Repr() >= m.Repr() {
-					subRelLemma2Wrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
-				} else {
-					subRelLemma2NoWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
-				}
-				@*/
+				syncAdd(C, A, D, B, m, a /*@, u.Repr(), preV, A.Repr(), B.Repr(), C.Repr(), D.Repr(), p / 4 @*/)
 			}
 		}
 
