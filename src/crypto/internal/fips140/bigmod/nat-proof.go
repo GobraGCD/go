@@ -300,8 +300,8 @@ func (x *Nat) assign(on choice, y *Nat /*@, ghost p perm @*/) (r *Nat) {
 //@ ensures  x.Inv() && acc(y.Inv(), p)
 //@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
 //@ ensures  0 <= c && c <= 1
-//@ ensures  x.Repr() == (old(x.Repr()) + y.Repr()) % old(x.ValCount())
-//@ ensures  (c == 0) == (old(x.Repr()) + y.Repr() < old(x.ValCount()))
+//@ ensures  c == 0 ==> x.Repr() == old(x.Repr()) + y.Repr()
+//@ ensures  c == 1 ==> x.Repr() == old(x.Repr()) + y.Repr() - old(x.ValCount())
 func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -1073,6 +1073,61 @@ func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
 	return x.setNat(u /*@, 1/2 @*/), nil
 }
 
+// syncAdd adds Y to X and W to Z, then subtracts bound1 from X and bound2 from Z
+// if the mathematical sum X+Y >= bound1. This is synchronized single-subtraction
+// modular reduction: X = (X + Y) mod bound1, with Z tracking the same wrap/no-wrap.
+//
+// Internally, the add may overflow the limb representation (when X+Y >= 2^(_W*len)),
+// but the subsequent conditional subtraction corrects for this. The carry from add
+// is used to detect overflow: if carry == 1 || X >= bound1, we subtract.
+// In the overflow+borrow case, ValCount cancels: X+Y-VC-bound1+VC = X+Y-bound1.
+//
+//go:norace
+//@ requires noPerm < p && p <= writePerm
+//@ requires X.Inv() && Z.Inv()
+//@ requires acc(Y.Inv(), p) && acc(W.Inv(), p)
+//@ requires acc(bound1.Inv(), p) && acc(bound2.Inv(), p)
+//@ requires X.AnnouncedLen() == Y.AnnouncedLen() && X.AnnouncedLen() == bound1.AnnouncedLen()
+//@ requires Z.AnnouncedLen() == W.AnnouncedLen() && Z.AnnouncedLen() == bound2.AnnouncedLen()
+//@ requires X.Repr() < bound1.Repr() && Y.Repr() < bound1.Repr() // sum < 2*bound1
+//@ requires Z.Repr() <= bound2.Repr() && W.Repr() <= bound2.Repr() // sum <= 2*bound2
+//@ requires X.Repr() + Y.Repr() >= bound1.Repr() ==> Z.Repr() + W.Repr() >= bound2.Repr()
+//@ requires X.Repr() + Y.Repr() <  bound1.Repr() ==> Z.Repr() + W.Repr() <= bound2.Repr()
+//@ ensures  X.Inv() && Z.Inv()
+//@ ensures  acc(Y.Inv(), p) && acc(W.Inv(), p)
+//@ ensures  acc(bound1.Inv(), p) && acc(bound2.Inv(), p)
+//@ ensures  X.AnnouncedLen() == old(X.AnnouncedLen())
+//@ ensures  Z.AnnouncedLen() == old(Z.AnnouncedLen())
+//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr()
+//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr() - bound1.Repr()
+//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr()
+//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr() - bound2.Repr()
+func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost p perm @*/) {
+	c := X.add(Y /*@, p / 2 @*/)
+	Z.add(W /*@, p / 2 @*/)
+	// After add: X.Repr() is either xOld+Y (c==0) or xOld+Y-VC (c==1).
+	// Z.Repr() is either zOld+W (no overflow) or zOld+W-VC_Z (overflow).
+
+	if choice(c) == yes || X.cmpGeq(bound1 /*@, p / 2 @*/) == yes {
+		// We enter here when xOld + Y >= bound1.
+		// Case c==1: add overflowed, so xOld+Y >= VC > bound1.
+		// Case c==0, cmpGeq==yes: X.Repr() = xOld+Y >= bound1.
+		//@ assert old(X.Repr()) + Y.Repr() >= bound1.Repr()
+		// From sync precondition:
+		//@ assert old(Z.Repr()) + W.Repr() >= bound2.Repr()
+
+		X.sub(bound1 /*@, p / 2 @*/)
+		Z.sub(bound2 /*@, p / 2 @*/)
+		// For X: both sub-cases yield xOld + Y - bound1:
+		//   c==0: X = xOld+Y - bound1 (no borrow, since xOld+Y >= bound1)
+		//   c==1: X = (xOld+Y-VC) - bound1 + VC = xOld+Y-bound1 (borrow, VC cancels)
+		// For Z: same double-wrap cancellation applies:
+		//   Z.add didn't overflow: Z_after_add = zOld+W >= bound2, sub gives zOld+W-bound2.
+		//   Z.add overflowed: Z_after_add = zOld+W-VC < bound2 (since zOld+W <= 2*bound2, VC > bound2),
+		//     sub borrows: zOld+W-VC-bound2+VC = zOld+W-bound2.
+	}
+}
+
 // extendedGCD computes u and A such that u = GCD(a, m) and u = A*a - B*m.
 //
 // u will have the size of the larger of a and m, and A will have the size of m.
@@ -1204,30 +1259,48 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 		if u.IsOdd(/*@ p / 2 @*/) == yes && v.IsOdd(/*@ p / 2 @*/) == yes {
 			if v.cmpGeq(u /*@, p / 4 @*/) == no {
 				//@ preU := u.Repr()
+				//@ preA := A.Repr()
+				//@ preB := B.Repr()
 				u.sub(v /*@, p / 2 @*/)
 				//@ gcdSubLemma(preU, v.Repr())
-				A.add(C /*@, p / 4 @*/)
-				B.add(D /*@, p / 4 @*/)
-				if A.cmpGeq(m /*@, p / 4 @*/) == yes {
-					A.sub(m /*@, p / 4 @*/)
-					B.sub(a /*@, p / 4 @*/)
-					//@ subRelLemmaWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				// Establish sync preconditions for syncAdd using AC_ge_BD_ge / AC_lt_BD_le:
+				/*@
+				ghost if preA + C.Repr() >= m.Repr() {
+					AC_ge_BD_ge(preU, v.Repr(), preA, preB, C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				} else {
-					//@ subRelLemmaNoWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+					AC_lt_BD_le(preU, v.Repr(), preA, preB, C.Repr(), D.Repr(), a.Repr(), m.Repr())
 				}
+				@*/
+				syncAdd(A, C, B, D, m, a /*@, p / 4 @*/)
+				/*@
+				ghost if preA + C.Repr() >= m.Repr() {
+					subRelLemmaWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				} else {
+					subRelLemmaNoWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				}
+				@*/
 			} else {
 				//@ preV := v.Repr()
+				//@ preC := C.Repr()
+				//@ preD := D.Repr()
 				v.sub(u /*@, p / 2 @*/)
 				//@ gcdSubLemma2(u.Repr(), preV)
-				C.add(A /*@, p / 4 @*/)
-				D.add(B /*@, p / 4 @*/)
-				if C.cmpGeq(m /*@, p / 4 @*/) == yes {
-					C.sub(m /*@, p / 4 @*/)
-					D.sub(a /*@, p / 4 @*/)
-					//@ subRelLemma2Wrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				// Establish sync preconditions for syncAdd using AC_ge_BD_ge / AC_lt_BD_le:
+				/*@
+				ghost if preC + A.Repr() >= m.Repr() {
+					AC_ge_BD_ge(u.Repr(), preV, A.Repr(), B.Repr(), preC, preD, a.Repr(), m.Repr())
 				} else {
-					//@ subRelLemma2NoWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+					AC_lt_BD_le(u.Repr(), preV, A.Repr(), B.Repr(), preC, preD, a.Repr(), m.Repr())
 				}
+				@*/
+				syncAdd(C, A, D, B, m, a /*@, p / 4 @*/)
+				/*@
+				ghost if preC + A.Repr() >= m.Repr() {
+					subRelLemma2Wrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				} else {
+					subRelLemma2NoWrap(u.Repr(), v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				}
+				@*/
 			}
 		}
 
@@ -1364,9 +1437,12 @@ func setOne(n *Nat) {
 
 //go:norace
 //@ trusted
-//@ preserves a.Inv()
-//@ ensures   a.Repr() == old(a.Repr()) / 2
-//@ ensures   a.AnnouncedLen() == old(a.AnnouncedLen())
+//@ requires 0 <= carry && carry <= 1
+//@ requires a.Inv()
+//@ ensures  a.Inv()
+//@ ensures  carry == 0 ==> a.Repr() == old(a.Repr()) / 2
+//@ ensures  carry == 1 ==> a.Repr() == (old(a.Repr()) + old(a.ValCount())) / 2
+//@ ensures  a.AnnouncedLen() == old(a.AnnouncedLen())
 func rshift1(a *Nat, carry uint) {
 	size := len(a.limbs)
 	aLimbs := a.limbs[:size]
