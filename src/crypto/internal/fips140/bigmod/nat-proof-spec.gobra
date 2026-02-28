@@ -460,16 +460,6 @@ func AC_lt_BD_le(u, v, A, B, C, D, a, m uint)
 //// end trusted non-linear arithmetic lemmas with Lean formalization ////
 
 //// begin non-linear arithmetic lemmas ////
-// Positive product: 0 < a and 0 < b implies 0 < a * b.
-// Isolates this NIA fact so Z3 handles it in a small context.
-ghost
-requires 0 < a && 0 < b
-ensures 0 < a * b
-decreases
-func posProdLemma(a, b int) {
-	// no body needed
-}
-
 // Distributive law: (a + b) * c == a * c + b * c
 // This isolates a single NIA fact for Z3.
 ghost
@@ -492,19 +482,6 @@ func subExpandLemma(u, v, A, B, C, D, a, m uint) {
     reveal nonLinearSub(v, D, C, m, a)
     distLemma(A, C, a)
     distLemma(B, D, m)
-}
-
-// Expand v - u symmetrically: v - u = (D+B)*m - (C+A)*a.
-ghost
-requires nonLinearSub(u, A, B, a, m)
-requires nonLinearSub(v, D, C, m, a)
-ensures v - u == (D + B) * m - (C + A) * a
-decreases
-func subExpandLemma2(u, v, A, B, C, D, a, m uint) {
-    reveal nonLinearSub(u, A, B, a, m)
-    reveal nonLinearSub(v, D, C, m, a)
-    distLemma(C, A, a)
-    distLemma(D, B, m)
 }
 
 // Modular addition preserves linear combinations (when wrapping is synchronized).
@@ -547,107 +524,6 @@ func modAddLemma(A, B, C, D, Ap, Bp, a, m uint) {
 		// So: (A+C)*a - (B+D)*m == Ap*a + m*a - Bp*m - a*m == Ap*a - Bp*m
 		// The last step requires m*a == a*m (commutativity), which Z3 knows.
 	}
-}
-
-// Relational invariant maintenance for subtraction (u > v case), no-wrap:
-// A' = A + C, B' = B + D (no modular reduction needed).
-// B+D <= a follows from AC_lt_BD_le (called at call site).
-ghost
-requires nonLinearSub(u + v, A - C, B - D, a, m)
-requires nonLinearSub(v, D, C, m, a)
-requires 0 < u && 0 < v && v < m // range for u, v
-requires 0 < a // range for a
-requires C <= A && A < m // range for A
-requires D <= B && B <= a + D // range for B
-requires 0 <= C && C < m // range for C
-requires 0 <= D && D <= a // range for D
-ensures nonLinearSub(u, A, B, a, m)
-ensures B <= a
-decreases
-func subRelLemmaNoWrap(u, v, A, B, C, D, a, m uint) {
-	uOld := u + v
-	AOld := A - C
-	BOld := B - D
-	AC_lt_BD_le(uOld, v, AOld, BOld, C, D, a, m)
-	subExpandLemma(uOld, v, AOld, BOld, C, D, a, m)
-	assert reveal nonLinearSub(u, A, B, a, m)
-}
-
-// Relational invariant maintenance for subtraction (u > v case), wrap:
-// A' = A + C - m, B' = B + D - a (synchronized subtraction).
-// B+D >= a is established by AC_ge_BD_ge (called at call site).
-ghost
-requires nonLinearSub(u + v, A - C + m, B - D + a, a, m)
-requires nonLinearSub(v, D, C, m, a)
-requires 0 < u && 0 <= v && u + v <= a // range for u, v
-requires 0 < a && a < m // range for a
-requires 0 <= A && A < C // range for A
-requires B <= D // range for B
-requires 0 <= C && C < m // range for C
-requires 0 <= D && D <= a // range for D
-ensures nonLinearSub(u, A, B, a, m)
-decreases
-func subRelLemmaWrap(u, v, A, B, C, D, a, m uint) {
-	uOld := u + v
-	AOld := A - C + m
-	BOld := B - D + a
-	AC_ge_BD_ge(uOld, v, AOld, BOld, C, D, a, m)
-	subExpandLemma(uOld, v, AOld, BOld, C, D, a, m)
-	// u == (AOld+C)*a - (BOld+D)*m
-	modAddLemma(AOld, BOld, C, D, A, B, a, m)
-	// (AOld+C)*a - (BOld+D)*m == A*a - B*m
-	assert reveal nonLinearSub(u, A, B, a, m)
-}
-
-// Relational invariant maintenance for subtraction (v >= u case), no-wrap:
-// C' = C + A, D' = D + B (no modular reduction needed).
-// D+B <= a follows from AC_lt_BD_le (called at call site).
-ghost
-requires nonLinearSub(u, A, B, a, m)
-requires nonLinearSub(v + u, D - B, C - A, m, a)
-requires 0 < u && v + u <= m
-requires 0 < a
-requires 0 <= A && A < m // range of A
-requires 0 <= B && B <= D // range of B
-requires C < m // range of C
-ensures nonLinearSub(v, D, C, m, a)
-ensures D <= a
-decreases
-func subRelLemma2NoWrap(u, v, A, B, C, D, a, m uint) {
-	vOld := v + u
-	COld := C - A
-	DOld := D - B
-	AC_lt_BD_le(u, vOld, A, B, COld, DOld, a, m)
-	subExpandLemma2(u, vOld, A, B, COld, DOld, a, m)
-	assert reveal nonLinearSub(v, D, C, m, a)
-}
-
-// Relational invariant maintenance for subtraction (v >= u case), wrap:
-// C' = C + A - m, D' = D + B - a (synchronized subtraction).
-ghost
-requires nonLinearSub(u, A, B, a, m)
-requires nonLinearSub(v + u, D - B + a, C - A + m, m, a)
-requires 0 < a && a < m // range of a
-requires 0 <= v + u && u <= a
-requires A < m // range of A
-requires 0 <= C && C < A // range of C
-requires 0 <= D && D <= B // range of D
-requires 0 <= B && B <= a // range of B
-ensures nonLinearSub(v, D, C, m, a)
-decreases
-func subRelLemma2Wrap(u, v, A, B, C, D, a, m uint) {
-	vOld := v + u
-	COld := C - A + m
-	DOld := D - B + a
-	AC_ge_BD_ge(u, vOld, A, B, COld, DOld, a, m)
-	subExpandLemma2(u, vOld, A, B, COld, DOld, a, m)
-	// v == (DOld+B)*m - (COld+A)*a
-	// With D = DOld+B-a and C = COld+A-m:
-	// (DOld+B)*m == (D+a)*m, (COld+A)*a == (C+m)*a
-	distLemma(D, a, m)  // (D+a)*m == D*m + a*m
-	distLemma(C, m, a)  // (C+m)*a == C*a + m*a
-	// Z3: v == D*m + a*m - C*a - m*a == D*m - C*a
-	assert reveal nonLinearSub(v, D, C, m, a)
 }
 
 // Parity lemma: when u = A*a - B*m is even and A or B is odd,
