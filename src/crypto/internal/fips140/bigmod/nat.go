@@ -32,7 +32,23 @@ const (
 // constant time by turning it into a mask.
 type choice uint
 
-func not(c choice) choice { return 1 ^ c }
+//@ trusted
+//@ requires c.isValid()
+//@ ensures  r.isValid() && r.Repr() == !c.Repr()
+//@ decreases
+//@ pure
+func not(c choice) (r choice) {
+	return 1 ^ c
+}
+
+//@ trusted // trusted because Gobra does not yet reason about bitwise operations
+//@ requires a.isValid() && b.isValid()
+//@ ensures  r.isValid() && r.Repr() == (a.Repr() || b.Repr())
+//@ decreases
+//@ pure
+func or(a, b choice) (r choice) {
+	return a | b
+}
 
 const yes = choice(1)
 const no = choice(0)
@@ -68,13 +84,25 @@ const preallocLimbs = (preallocTarget + _W - 1) / _W
 // NewNat returns a new nat with a size of zero, just like new(Nat), but with
 // the preallocated capacity to hold a number of up to preallocTarget bits.
 // NewNat inlines, so the allocation can live on the stack.
-func NewNat() *Nat {
+//@ ensures n.Inv()
+//@ ensures n.Repr() == 0 && n.AnnouncedLen() == 0
+func NewNat() (n *Nat) {
 	limbs := make([]uint, 0, preallocLimbs)
-	return &Nat{limbs}
+	n = &Nat{limbs}
+	//@ fold n.Inv()
+	//@ assert reveal n.AnnouncedLen() == 0
+	//@ assert reveal exp(2, 0) == 1
+	return n
 }
 
 // expand expands x to n limbs, leaving its value unchanged.
-func (x *Nat) expand(n int) *Nat {
+//@ trusted
+//@ requires x.Inv() && x.AnnouncedLen() <= n
+//@ ensures  r == x
+//@ ensures  x.Inv()
+//@ ensures  x.AnnouncedLen() == n
+//@ ensures  x.Repr() == old(x.Repr())
+func (x *Nat) expand(n int) (r *Nat) {
 	if len(x.limbs) > n {
 		panic("bigmod: internal error: shrinking nat")
 	}
@@ -91,7 +119,13 @@ func (x *Nat) expand(n int) *Nat {
 }
 
 // reset returns a zero nat of n limbs, reusing x's storage if n <= cap(x.limbs).
-func (x *Nat) reset(n int) *Nat {
+//@ trusted
+//@ requires  0 <= n
+//@ preserves x.Inv()
+//@ ensures   r == x
+//@ ensures   x.Repr() == 0
+//@ ensures   x.AnnouncedLen() == n
+func (x *Nat) reset(n int) (r *Nat) {
 	if cap(x.limbs) < n {
 		x.limbs = make([]uint, n)
 		return x
@@ -107,6 +141,8 @@ func (x *Nat) reset(n int) *Nat {
 //
 // The announced length of x is set based on the actual bit size of the input,
 // ignoring leading zeroes.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) resetToBytes(b []byte) *Nat {
 	x.reset((len(b) + _S - 1) / _S)
 	if err := x.setBytes(b); err != nil {
@@ -116,6 +152,8 @@ func (x *Nat) resetToBytes(b []byte) *Nat {
 }
 
 // trim reduces the size of x to match its value.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) trim() *Nat {
 	// Trim most significant (trailing in little-endian) zero limbs.
 	// We assume comparison with zero (but not the branch) is constant time.
@@ -128,8 +166,14 @@ func (x *Nat) trim() *Nat {
 	return x
 }
 
+// "set" is unfortunately a keyword in Gobra so we use "setNat" instead.
 // set assigns x = y, optionally resizing x to the appropriate size.
-func (x *Nat) set(y *Nat) *Nat {
+//@ requires  noPerm < p
+//@ preserves x.Inv() && acc(y.Inv(), p)
+//@ ensures   r == x
+//@ ensures   x.Repr() == y.Repr()
+//@ ensures   x.AnnouncedLen() == y.AnnouncedLen()
+func (x *Nat) setNat(y *Nat /*@, ghost p perm @*/) (r *Nat) {
 	x.reset(len(y.limbs))
 	copy(x.limbs, y.limbs)
 	return x
@@ -138,6 +182,8 @@ func (x *Nat) set(y *Nat) *Nat {
 // Bits returns x as a little-endian slice of uint. The length of the slice
 // matches the announced length of x. The result and x share the same underlying
 // array.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) Bits() []uint {
 	return x.limbs
 }
@@ -146,6 +192,8 @@ func (x *Nat) Bits() []uint {
 // slice will match the size of m.
 //
 // x must have the same size as m and it must be less than or equal to m.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) Bytes(m *Modulus) []byte {
 	i := m.Size()
 	bytes := make([]byte, i)
@@ -171,6 +219,8 @@ func (x *Nat) Bytes(m *Modulus) []byte {
 // The output will be resized to the size of m and overwritten.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) SetBytes(b []byte, m *Modulus) (*Nat, error) {
 	x.resetFor(m)
 	if err := x.setBytes(b); err != nil {
@@ -187,6 +237,8 @@ func (x *Nat) SetBytes(b []byte, m *Modulus) (*Nat, error) {
 // reduces overflowing values up to 2^⌈log2(m)⌉ - 1.
 //
 // The output will be resized to the size of m and overwritten.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) SetOverflowingBytes(b []byte, m *Modulus) (*Nat, error) {
 	x.resetFor(m)
 	if err := x.setBytes(b); err != nil {
@@ -204,6 +256,8 @@ func (x *Nat) SetOverflowingBytes(b []byte, m *Modulus) (*Nat, error) {
 
 // bigEndianUint returns the contents of buf interpreted as a
 // big-endian encoded uint value.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func bigEndianUint(buf []byte) uint {
 	if _W == 64 {
 		return uint(byteorder.BEUint64(buf))
@@ -211,6 +265,8 @@ func bigEndianUint(buf []byte) uint {
 	return uint(byteorder.BEUint32(buf))
 }
 
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) setBytes(b []byte) error {
 	i, k := len(b), 0
 	for k < len(x.limbs) && i >= _S {
@@ -231,6 +287,8 @@ func (x *Nat) setBytes(b []byte) error {
 // SetUint assigns x = y.
 //
 // The output will be resized to a single limb and overwritten.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) SetUint(y uint) *Nat {
 	x.reset(1)
 	x.limbs[0] = y
@@ -242,6 +300,8 @@ func (x *Nat) SetUint(y uint) *Nat {
 // Both operands must have the same announced length.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) Equal(y *Nat) choice {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -258,7 +318,11 @@ func (x *Nat) Equal(y *Nat) choice {
 // IsZero returns 1 if x == 0, and 0 otherwise.
 //
 //go:norace
-func (x *Nat) IsZero() choice {
+//@ trusted
+//@ requires  noPerm < p
+//@ preserves acc(x.Inv(), p)
+//@ ensures   r == (x.Repr() == 0 ? yes : no)
+func (x *Nat) IsZero(/*@ ghost p perm @*/) (r choice) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
 	xLimbs := x.limbs[:size]
@@ -273,7 +337,11 @@ func (x *Nat) IsZero() choice {
 // IsOne returns 1 if x == 1, and 0 otherwise.
 //
 //go:norace
-func (x *Nat) IsOne() choice {
+//@ trusted
+//@ requires  noPerm < p
+//@ preserves acc(x.Inv(), p)
+//@ ensures   r == (x.Repr() == 1 ? yes : no)
+func (x *Nat) IsOne(/*@ ghost p perm @*/) (r choice) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
 	xLimbs := x.limbs[:size]
@@ -295,6 +363,8 @@ func (x *Nat) IsOne() choice {
 // modulo m.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) IsMinusOne(m *Modulus) choice {
 	minusOne := m.Nat()
 	minusOne.SubOne(m)
@@ -302,7 +372,11 @@ func (x *Nat) IsMinusOne(m *Modulus) choice {
 }
 
 // IsOdd returns 1 if x is odd, and 0 otherwise.
-func (x *Nat) IsOdd() choice {
+//@ trusted
+//@ requires  noPerm < p
+//@ preserves acc(x.Inv(), p)
+//@ ensures   r == (x.Repr() % 2 == 1 ? yes : no)
+func (x *Nat) IsOdd(/*@ ghost p perm @*/) (r choice) {
 	if len(x.limbs) == 0 {
 		return no
 	}
@@ -310,6 +384,8 @@ func (x *Nat) IsOdd() choice {
 }
 
 // TrailingZeroBitsVarTime returns the number of trailing zero bits in x.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) TrailingZeroBitsVarTime() uint {
 	var t uint
 	limbs := x.limbs
@@ -329,7 +405,13 @@ func (x *Nat) TrailingZeroBitsVarTime() uint {
 // Both operands must have the same announced length.
 //
 //go:norace
-func (x *Nat) cmpGeq(y *Nat) choice {
+//@ trusted
+//@ requires noPerm < p
+//@ requires acc(x.Inv(), p) && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ ensures  acc(x.Inv(), p) && acc(y.Inv(), p)
+//@ ensures  r == (x.Repr() >= y.Repr() ? yes : no)
+func (x *Nat) cmpGeq(y *Nat /*@, ghost p perm @*/) (r choice) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
 	xLimbs := x.limbs[:size]
@@ -349,7 +431,16 @@ func (x *Nat) cmpGeq(y *Nat) choice {
 // Both operands must have the same announced length.
 //
 //go:norace
-func (x *Nat) assign(on choice, y *Nat) *Nat {
+//@ trusted
+//@ requires noPerm < p
+//@ requires x.Inv() && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ requires on.isValid()
+//@ ensures  r == x
+//@ ensures  x.Inv() && acc(y.Inv(), p)
+//@ ensures  x.Repr() == (on.Repr() ? y.Repr() : old(x.Repr()))
+//@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+func (x *Nat) assign(on choice, y *Nat /*@, ghost p perm @*/) (r *Nat) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
 	xLimbs := x.limbs[:size]
@@ -367,7 +458,16 @@ func (x *Nat) assign(on choice, y *Nat) *Nat {
 // Both operands must have the same announced length.
 //
 //go:norace
-func (x *Nat) add(y *Nat) (c uint) {
+//@ trusted
+//@ requires noPerm < p
+//@ requires x.Inv() && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ ensures  x.Inv() && acc(y.Inv(), p)
+//@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+//@ ensures  0 <= c && c <= 1
+//@ ensures  c == 0 ==> x.Repr() == old(x.Repr()) + y.Repr()
+//@ ensures  c == 1 ==> x.Repr() == old(x.Repr()) + y.Repr() - old(x.ValCount())
+func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
 	xLimbs := x.limbs[:size]
@@ -384,7 +484,16 @@ func (x *Nat) add(y *Nat) (c uint) {
 // Both operands must have the same announced length.
 //
 //go:norace
-func (x *Nat) sub(y *Nat) (c uint) {
+//@ trusted
+//@ requires noPerm < p
+//@ requires x.Inv() && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ ensures  x.Inv() && acc(y.Inv(), p)
+//@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+//@ ensures  0 <= c && c <= 1
+//@ ensures  c == 0 ==> old(x.Repr()) >= y.Repr() && x.Repr() == old(x.Repr()) - y.Repr()
+//@ ensures  c == 1 ==> old(x.Repr()) < y.Repr() && x.Repr() == old(x.Repr()) - y.Repr() + old(x.ValCount())
+func (x *Nat) sub(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
 	xLimbs := x.limbs[:size]
@@ -401,6 +510,8 @@ func (x *Nat) sub(y *Nat) (c uint) {
 // The announced length of x is unchanged.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) ShiftRightVarTime(n uint) *Nat {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -433,6 +544,8 @@ func (x *Nat) ShiftRightVarTime(n uint) *Nat {
 //
 // The actual size of x (but nothing more) leaks through timing side-channels.
 // Note that this is ordinarily secret, as opposed to the announced size of x.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) BitLenVarTime() int {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -475,9 +588,13 @@ type Modulus struct {
 	odd   bool
 	m0inv uint // -nat.limbs[0]⁻¹ mod _W
 	rr    *Nat // R*R for montgomeryRepresentation
+
+	//@ ghost natOnly bool
 }
 
 // rr returns R*R with R = 2^(_W * n) and n = len(m.nat.limbs).
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func rr(m *Modulus) *Nat {
 	rr := NewNat().ExpandFor(m)
 	n := uint(len(rr.limbs))
@@ -548,6 +665,9 @@ func minusInverseModW(x uint) uint {
 //
 // The number of significant bits and whether the modulus is even is leaked
 // through timing side-channels.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
+// TODO: verify this function
 func NewModulus(b []byte) (*Modulus, error) {
 	n := NewNat().resetToBytes(b)
 	return newModulus(n)
@@ -557,6 +677,8 @@ func NewModulus(b []byte) (*Modulus, error) {
 // represented as big-endian byte slices. The result must be greater than one.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func NewModulusProduct(a, b []byte) (*Modulus, error) {
 	x := NewNat().resetToBytes(a)
 	y := NewNat().resetToBytes(b)
@@ -567,6 +689,8 @@ func NewModulusProduct(a, b []byte) (*Modulus, error) {
 	return newModulus(n.trim())
 }
 
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func newModulus(n *Nat) (*Modulus, error) {
 	m := &Modulus{nat: n}
 	if m.nat.IsZero() == yes || m.nat.IsOne() == yes {
@@ -581,16 +705,22 @@ func newModulus(n *Nat) (*Modulus, error) {
 }
 
 // Size returns the size of m in bytes.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (m *Modulus) Size() int {
 	return (m.BitLen() + 7) / 8
 }
 
 // BitLen returns the size of m in bits.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (m *Modulus) BitLen() int {
 	return m.nat.BitLenVarTime()
 }
 
 // Nat returns m as a Nat.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (m *Modulus) Nat() *Nat {
 	// Make a copy so that the caller can't modify m.nat or alias it with
 	// another Nat in a modulus operation.
@@ -604,6 +734,8 @@ func (m *Modulus) Nat() *Nat {
 // This assumes that x is already reduced mod m.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) shiftIn(y uint, m *Modulus) *Nat {
 	d := NewNat().resetFor(m)
 
@@ -645,6 +777,8 @@ func (x *Nat) shiftIn(y uint, m *Modulus) *Nat {
 // The output will be resized to the size of m and overwritten.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (out *Nat) Mod(x *Nat, m *Modulus) *Nat {
 	out.resetFor(m)
 	// Working our way from the most significant to the least significant limb,
@@ -674,6 +808,8 @@ func (out *Nat) Mod(x *Nat, m *Modulus) *Nat {
 // ExpandFor ensures x has the right size to work with operations modulo m.
 //
 // The announced size of x must be smaller than or equal to that of m.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) ExpandFor(m *Modulus) *Nat {
 	return x.expand(len(m.nat.limbs))
 }
@@ -681,6 +817,8 @@ func (x *Nat) ExpandFor(m *Modulus) *Nat {
 // resetFor ensures out has the right size to work with operations modulo m.
 //
 // out is zeroed and may start at any size.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (out *Nat) resetFor(m *Modulus) *Nat {
 	return out.reset(len(m.nat.limbs))
 }
@@ -696,13 +834,26 @@ func (out *Nat) resetFor(m *Modulus) *Nat {
 // x and m operands must have the same announced length.
 //
 //go:norace
-func (x *Nat) maybeSubtractModulus(always choice, m *Modulus) {
-	t := NewNat().set(x)
-	underflow := t.sub(m.nat)
+//@ requires noPerm < p
+//@ requires x.Inv() && acc(m.Inv(), p)
+//@ requires x.Repr() < 2*m.Repr()
+//@ requires x.AnnouncedLen() == m.AnnouncedLen()
+//@ requires always.isValid()
+//@ ensures  x.Inv() && acc(m.Inv(), p)
+//@ ensures  0 < m.Repr() // this is a direct consequence of the precondition but required to make `_ % m.Repr()` well-defined
+//@ ensures  always.Repr() ?
+//@		x.Repr() == (old(x.Repr()) >= m.Repr() ? old(x.Repr()) - m.Repr() : old(x.Repr()) - m.Repr() + x.ValCount()) :
+//@		x.Repr() == old(x.Repr()) % m.Repr()
+//@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+func (x *Nat) maybeSubtractModulus(always choice, m *Modulus /*@, ghost p perm @*/) {
+	t := NewNat().setNat(x /*@, 1/2 @*/)
+	//@ unfold acc(m.Inv(), p)
+	underflow := t.sub(m.nat /*@, p/2 @*/)
+	//@ fold acc(m.Inv(), p)
 	// We keep the result if x - m didn't underflow (meaning x >= m)
 	// or if always was set.
-	keep := not(choice(underflow)) | choice(always)
-	x.assign(keep, t)
+	keep := or(not(choice(underflow)), choice(always))
+	x.assign(keep, t /*@, 1/2 @*/)
 }
 
 // Sub computes x = x - y mod m.
@@ -711,6 +862,8 @@ func (x *Nat) maybeSubtractModulus(always choice, m *Modulus) {
 // must already be reduced modulo m.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) Sub(y *Nat, m *Modulus) *Nat {
 	underflow := x.sub(y)
 	// If the subtraction underflowed, add m.
@@ -723,6 +876,8 @@ func (x *Nat) Sub(y *Nat, m *Modulus) *Nat {
 // SubOne computes x = x - 1 mod m.
 //
 // The length of x must be the same as the modulus.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) SubOne(m *Modulus) *Nat {
 	one := NewNat().ExpandFor(m)
 	one.limbs[0] = 1
@@ -737,9 +892,18 @@ func (x *Nat) SubOne(m *Modulus) *Nat {
 // must already be reduced modulo m.
 //
 //go:norace
-func (x *Nat) Add(y *Nat, m *Modulus) *Nat {
-	overflow := x.add(y)
-	x.maybeSubtractModulus(choice(overflow), m)
+//@ requires noPerm < p && noPerm < q
+//@ requires x.Inv() && acc(y.Inv(), p) && acc(m.Inv(), q)
+//@ requires x.AnnouncedLen() == m.AnnouncedLen() && y.AnnouncedLen() == m.AnnouncedLen()
+//@ requires 0 <= x.Repr() && x.Repr() < m.Repr()
+//@ requires 0 <= y.Repr() && y.Repr() < m.Repr()
+//@ ensures  r == x
+//@ ensures  x.Inv() && acc(y.Inv(), p) && acc(m.Inv(), q)
+//@ ensures  0 <= x.Repr() && x.Repr() < m.Repr()
+//@ ensures  x.Repr() == (old(x.Repr()) + y.Repr()) % m.Repr()
+func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p, q perm @*/) (r *Nat) {
+	overflow := x.add(y /*@, p/2 @*/)
+	x.maybeSubtractModulus(choice(overflow), m /*@, q/2 @*/)
 	return x
 }
 
@@ -750,6 +914,8 @@ func (x *Nat) Add(y *Nat, m *Modulus) *Nat {
 // numbers in this representation.
 //
 // This assumes that x is already reduced mod m.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) montgomeryRepresentation(m *Modulus) *Nat {
 	// A Montgomery multiplication (which computes a * b / R) by R * R works out
 	// to a multiplication by R, which takes the value out of the Montgomery domain.
@@ -760,6 +926,8 @@ func (x *Nat) montgomeryRepresentation(m *Modulus) *Nat {
 // n = len(m.nat.limbs).
 //
 // This assumes that x is already reduced mod m.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) montgomeryReduction(m *Modulus) *Nat {
 	// By Montgomery multiplying with 1 not in Montgomery representation, we
 	// convert out back from Montgomery representation, because it works out to
@@ -776,6 +944,8 @@ func (x *Nat) montgomeryReduction(m *Modulus) *Nat {
 // x will be resized to the size of m and overwritten.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) montgomeryMul(a *Nat, b *Nat, m *Modulus) *Nat {
 	n := len(m.nat.limbs)
 	mLimbs := m.nat.limbs[:n]
@@ -899,6 +1069,8 @@ func (x *Nat) montgomeryMul(a *Nat, b *Nat, m *Modulus) *Nat {
 // It can be thought of as one row of a pen-and-paper column multiplication.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func addMulVVW(z, x []uint, y uint) (carry uint) {
 	_ = x[len(z)-1] // bounds check elimination hint
 	for i := range z {
@@ -921,6 +1093,8 @@ func addMulVVW(z, x []uint, y uint) (carry uint) {
 // must already be reduced modulo m.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) Mul(y *Nat, m *Modulus) *Nat {
 	if m.odd {
 		// A Montgomery multiplication by a value out of the Montgomery domain
@@ -984,6 +1158,8 @@ func (x *Nat) Mul(y *Nat, m *Modulus) *Nat {
 // m must be odd, or Exp will panic.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (out *Nat) Exp(x *Nat, e []byte, m *Modulus) *Nat {
 	if !m.odd {
 		panic("bigmod: modulus for Exp must be odd")
@@ -1039,6 +1215,8 @@ func (out *Nat) Exp(x *Nat, e []byte, m *Modulus) *Nat {
 // be reduced modulo m. This leaks the exponent through timing side-channels.
 //
 // m must be odd, or ExpShortVarTime will panic.
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (out *Nat) ExpShortVarTime(x *Nat, e uint, m *Modulus) *Nat {
 	if !m.odd {
 		panic("bigmod: modulus for ExpShortVarTime must be odd")
@@ -1065,27 +1243,48 @@ func (out *Nat) ExpShortVarTime(x *Nat, e uint, m *Modulus) *Nat {
 // output will be resized to the size of m and overwritten.
 //
 //go:norace
-func (x *Nat) InverseVarTime(a *Nat, m *Modulus) (*Nat, bool) {
-	u, A, err := extendedGCD(a, m.nat)
+//@ requires noPerm < p && p <= writePerm
+//@ requires x.Inv() && acc(a.Inv(), p) && acc(m.Inv(), p)
+//@ requires a.Repr() < m.Repr() // a must be reduced modulo m
+//@ ensures  x.Inv() && acc(a.Inv(), p) && acc(m.Inv(), p)
+//@ ensures  r == x
+//@ ensures  ok ==> gcd(a.Repr(), m.Repr()) == x.Repr() * a.Repr() - BRepr * m.Repr()
+//@ ensures  ok ==> x.AnnouncedLen() == m.AnnouncedLen()
+//@ ensures !ok ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
+func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, ok bool /*@, ghost BRepr uint @*/) {
+	//@ unfold acc(m.Inv(), p/2)
+	u, A, err /*@, BRepr @*/ := extendedGCD(a, m.nat /*@, p/4 @*/)
+	//@ fold acc(m.Inv(), p/2)
 	if err != nil {
-		return x, false
+		return x, false /*@, BRepr @*/
 	}
-	if u.IsOne() == no {
-		return x, false
+	if u.IsOne(/*@ p/2 @*/) == no {
+		return x, false /*@, BRepr @*/
 	}
-	return x.set(A), true
+	return x.setNat(A /*@, 1/2 @*/), true /*@, BRepr @*/
 }
 
 // GCDVarTime calculates x = GCD(a, b) where at least one of a or b is odd, and
 // both are non-zero. If GCDVarTime returns an error, x is not modified.
 //
 // The output will be resized to the size of the larger of a and b.
-func (x *Nat) GCDVarTime(a, b *Nat) (*Nat, error) {
-	u, _, err := extendedGCD(a, b)
+//@ requires noPerm < p && p <= writePerm
+//@ requires x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
+//@ requires a.Repr() % 2 == 1 || b.Repr() % 2 == 1 // at least one of a or b is odd
+//@ requires a.Repr() != 0 && b.Repr() != 0 // both a and b are non-zero
+//@ ensures  x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
+//@ ensures  err == nil ==> r == x
+//@ ensures  err == nil ==> x.Repr() == gcd(a.Repr(), b.Repr())
+//@ ensures  err != nil ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
+func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
+	// bug: we cannot simply invoke `extendedGCD` due to its
+	// preconditions!
+	// TODO: if a.Equal(b) == yes
+	u, _, err /*@, BRepr @*/ := extendedGCD(a, b /*@, p @*/)
 	if err != nil {
 		return nil, err
 	}
-	return x.set(u), nil
+	return x.setNat(u /*@, 1/2 @*/), nil
 }
 
 // UseSynchronizedWrappingInExtendedGCD switches coefficient updates in
@@ -1101,7 +1300,16 @@ var UseSynchronizedWrappingInExtendedGCD bool
 // u will have the size of the larger of a and m, and A will have the size of m.
 //
 // It is an error if either a or m is zero, or if they are both even.
-func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
+//@ requires noPerm < p && p <= writePerm
+//@ requires acc(a.Inv(), p) && acc(m.Inv(), p)
+//@ requires a.Repr() < m.Repr() // TODO move this into the function
+//@ ensures  acc(a.Inv(), p) && acc(m.Inv(), p)
+//@ ensures  err == nil ==> u.Inv() && A.Inv()
+//@ ensures  err == nil ==> u.Repr() == gcd(a.Repr(), m.Repr())
+//@ ensures  err == nil ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
+//@ ensures  err == nil ==> u.AnnouncedLen() == gmax(a.AnnouncedLen(), m.AnnouncedLen())
+//@ ensures  err == nil ==> A.AnnouncedLen() == m.AnnouncedLen()
+func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr uint @*/) {
 	// This is the extended binary GCD algorithm described in the Handbook of
 	// Applied Cryptography, Algorithm 14.61, adapted by BoringSSL to bound
 	// coefficients and avoid negative numbers. For more details and proof of
@@ -1126,16 +1334,22 @@ func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
 	//
 	// Note this algorithm does not handle either input being zero.
 
-	if a.IsZero() == yes || m.IsZero() == yes {
-		return nil, nil, errors.New("extendedGCD: a or m is zero")
+	if a.IsZero(/*@ p / 2 @*/) == yes || m.IsZero(/*@ p / 2 @*/) == yes {
+		return nil, nil, errors.New("extendedGCD: a or m is zero") /*@, 0 @*/
 	}
-	if a.IsOdd() == no && m.IsOdd() == no {
-		return nil, nil, errors.New("extendedGCD: both a and m are even")
+	if a.IsOdd(/*@ p / 2 @*/) == no && m.IsOdd(/*@ p / 2 @*/) == no {
+		return nil, nil, errors.New("extendedGCD: both a and m are even") /*@, 0 @*/
 	}
 
+	// TODO: we need a lemma that gives us the fact that !m.IsZero ==> m.AnnouncedLen() > 0
+	assume m.AnnouncedLen() > 0
+	assume a.AnnouncedLen() > 0
+	//@ assert 0 < a.Repr() && 0 < m.Repr()
+	//@ assert a.Repr() % 2 != 0 || m.Repr() % 2 != 0
+
 	size := max(len(a.limbs), len(m.limbs))
-	u = NewNat().set(a).expand(size)
-	v := NewNat().set(m).expand(size)
+	u = NewNat().setNat(a /*@, p / 2 @*/).expand(size)
+	v := NewNat().setNat(m /*@, p / 2 @*/).expand(size)
 
 	A = NewNat().reset(len(m.limbs))
 	A.limbs[0] = 1
@@ -1143,6 +1357,20 @@ func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
 	C := NewNat().reset(len(m.limbs))
 	D := NewNat().reset(len(a.limbs))
 	D.limbs[0] = 1
+
+	// Construct Modulus wrappers for modular addition of coefficients.
+	mMod := &Modulus{nat: m}
+	//@ mMod.natOnly = true
+	//@ fold acc(mMod.Inv(), p/2)
+	aMod := &Modulus{nat: a}
+	//@ aMod.natOnly = true
+	//@ fold acc(aMod.Inv(), p/2)
+
+	// Establish relational invariants:
+	// u = a = 1*a - 0*m, so nonLinearSub(a, 1, 0, a, m) holds.
+	// v = m = 1*m - 0*a, so nonLinearSub(m, 1, 0, m, a) holds.
+	//@ assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+	//@ assert reveal nonLinearSub(v.Repr(), D.Repr(), C.Repr(), m.Repr(), a.Repr())
 
 	// Before and after each loop iteration, the following hold:
 	//
@@ -1157,32 +1385,57 @@ func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
 	//
 	// After each loop iteration, u and v only get smaller, and at least one of
 	// them shrinks by at least a factor of two.
+		// Permissions & sizes:
+	//@ invariant acc(m.Inv(), p/2) && 0 < m.AnnouncedLen()
+	//@ invariant acc(a.Inv(), p/2) && 0 < a.AnnouncedLen()
+	//@ invariant size == gmax(a.AnnouncedLen(), m.AnnouncedLen())
+	//@ invariant u.Inv() && u.AnnouncedLen() == size
+	//@ invariant v.Inv() && v.AnnouncedLen() == size
+	//@ invariant A.Inv() && A.AnnouncedLen() == m.AnnouncedLen()
+	//@ invariant B.Inv() && B.AnnouncedLen() == a.AnnouncedLen()
+	//@ invariant C.Inv() && C.AnnouncedLen() == m.AnnouncedLen()
+	//@ invariant D.Inv() && D.AnnouncedLen() == a.AnnouncedLen()
+	//@ invariant acc(mMod.Inv(), p/2) && mMod.IsNatOnly()
+	//@ invariant acc(aMod.Inv(), p/2) && aMod.IsNatOnly()
+	// Bounds:
+	//@ invariant 0 < a.Repr() && 0 < m.Repr()
+	//@ invariant mMod.Repr() == m.Repr() && aMod.Repr() == a.Repr()
+	//@ invariant a.Repr() < m.Repr()
+	//@ invariant 0 < u.Repr() && u.Repr() <= a.Repr() // range for u
+	//@ invariant 0 <= v.Repr() && v.Repr() <= m.Repr() // range for v
+	//@ invariant 0 <= A.Repr() && A.Repr() < m.Repr() // range for A
+	//@ invariant 0 <= B.Repr() && B.Repr() < a.Repr() // range for B; stronger than fiat-crypto's B ≤ a
+	//@ invariant 0 <= C.Repr() && C.Repr() < m.Repr() // range for C
+	//@ invariant 0 <= D.Repr() && D.Repr() <= a.Repr() // range for D
+	// Parity: at least one of a,m is odd:
+	//@ invariant a.Repr() % 2 == 1 || m.Repr() % 2 == 1
+	// Parity: at least one of u,v is odd (since gcd is odd).
+	//@ invariant u.Repr() % 2 == 1 || v.Repr() % 2 == 1
+	//@ invariant gcd(u.Repr(), v.Repr()) == gcd(a.Repr(), m.Repr())
+	// Relational invariants (abstract to avoid NIA):
+	//@ invariant nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+	//@ invariant nonLinearSub(v.Repr(), D.Repr(), C.Repr(), m.Repr(), a.Repr())
+	//@ decreases u.Repr() + v.Repr()
 	for {
 		// If both u and v are odd, subtract the smaller from the larger.
 		// If u = v, we need to subtract from v to hit the modified exit condition.
-		if u.IsOdd() == yes && v.IsOdd() == yes {
-			if v.cmpGeq(u) == no {
+		if u.IsOdd(/*@ p / 2 @*/) == yes && v.IsOdd(/*@ p / 2 @*/) == yes {
+			if v.cmpGeq(u /*@, p / 4 @*/) == no {
+				//@ preU := u.Repr()
 				u.sub(v)
+				//@ gcdSubLemma(preU, v.Repr())
 				if UseSynchronizedWrappingInExtendedGCD {
-					A.add(C)
-					B.add(D)
-					if A.cmpGeq(m) == yes {
-						A.sub(m)
-						B.sub(a)
-					}
+					syncAdd(A, C, B, D, m, a /*@, preU, v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), p / 4 @*/)
 				} else {
 					A.Add(C, &Modulus{nat: m})
 					B.Add(D, &Modulus{nat: a})
 				}
 			} else {
+				//@ preV := v.Repr()
 				v.sub(u)
+				//@ gcdSubLemma2(u.Repr(), preV)
 				if UseSynchronizedWrappingInExtendedGCD {
-					C.add(A)
-					D.add(B)
-					if C.cmpGeq(m) == yes {
-						C.sub(m)
-						D.sub(a)
-					}
+					syncAdd(C, A, D, B, m, a /*@, u.Repr(), preV, A.Repr(), B.Repr(), C.Repr(), D.Repr(), p / 4 @*/)
 				} else {
 					C.Add(A, &Modulus{nat: m})
 					D.Add(B, &Modulus{nat: a})
@@ -1191,38 +1444,62 @@ func extendedGCD(a, m *Nat) (u, A *Nat, err error) {
 		}
 
 		// Exactly one of u and v is now even.
-		if u.IsOdd() == v.IsOdd() {
+		if u.IsOdd(/*@ p / 2 @*/) == v.IsOdd() {
 			panic("bigmod: internal error: u and v are not in the expected state")
 		}
 
 		// Halve the even one and adjust the corresponding coefficient.
-		if u.IsOdd() == no {
+		if u.IsOdd(/*@ p / 2 @*/) == no {
+			//@ preU := u.Repr()
 			rshift1(u, 0)
-			if A.IsOdd() == yes || B.IsOdd() == yes {
-				rshift1(A, A.add(m))
-				rshift1(B, B.add(a))
+			//@ gcdHalfLemma(preU, v.Repr())
+			if A.IsOdd(/*@ p / 2 @*/) == yes || B.IsOdd(/*@ p / 2 @*/) == yes {
+				//@ parityLemma(preU, A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				rshift1(A, A.add(m /*@, p / 4 @*/))
+				rshift1(B, B.add(a /*@, p / 4 @*/))
+				//@ halvRelLemmaU2(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
 			} else {
 				rshift1(A, 0)
 				rshift1(B, 0)
+				//@ halvRelLemmaU1(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
 			}
 		} else { // v.IsOdd() == no
+			//@ preV := v.Repr()
 			rshift1(v, 0)
-			if C.IsOdd() == yes || D.IsOdd() == yes {
-				rshift1(C, C.add(m))
-				rshift1(D, D.add(a))
+			//@ gcdHalfLemma2(u.Repr(), preV)
+			if C.IsOdd(/*@ p / 2 @*/) == yes || D.IsOdd(/*@ p / 2 @*/) == yes {
+				//@ parityLemmaV(preV, C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				rshift1(C, C.add(m /*@, p / 4 @*/))
+				rshift1(D, D.add(a /*@, p / 4 @*/))
+				//@ halvRelLemmaV2(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 			} else {
 				rshift1(C, 0)
 				rshift1(D, 0)
+				//@ halvRelLemmaV1(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
 			}
 		}
 
-		if v.IsZero() == yes {
-			return u, A, nil
+		if v.IsZero(/*@ p / 2 @*/) == yes {
+			// v == 0, so gcd(u, 0) == u (base case of gcd)
+			//@ gcdBaseLemma(u.Repr())
+			// Open the opaque relational invariant to get the actual equation
+			// for the postcondition: u = A*a - B*m.
+			//@ assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+			//@ unfold acc(mMod.Inv(), p/2)
+			//@ unfold acc(aMod.Inv(), p/2)
+			return u, A, nil /*@, B.Repr() @*/
 		}
 	}
 }
 
 //go:norace
+//@ trusted
+//@ requires 0 <= carry && carry <= 1
+//@ requires a.Inv()
+//@ ensures  a.Inv()
+//@ ensures  carry == 0 ==> a.Repr() == old(a.Repr()) / 2
+//@ ensures  carry == 1 ==> a.Repr() == (old(a.Repr()) + old(a.ValCount())) / 2
+//@ ensures  a.AnnouncedLen() == old(a.AnnouncedLen())
 func rshift1(a *Nat, carry uint) {
 	size := len(a.limbs)
 	aLimbs := a.limbs[:size]
@@ -1237,11 +1514,112 @@ func rshift1(a *Nat, carry uint) {
 	}
 }
 
+// syncAdd adds Y to X and W to Z, then subtracts bound1 from X and bound2 from Z
+// if the mathematical sum X+Y >= bound1. This is synchronized single-subtraction
+// modular reduction: X = (X + Y) mod bound1, with Z tracking the same wrap/no-wrap.
+//
+// Internally, the add may overflow the limb representation (when X+Y >= 2^(_W*len)),
+// but the subsequent conditional subtraction corrects for this. The carry from add
+// is used to detect overflow: if carry == 1 || X >= bound1, we subtract.
+// In the overflow+borrow case, ValCount cancels: X+Y-VC-bound1+VC = X+Y-bound1.
+//
+// The ghost parameters U, V, A, B, C, D represent the relational
+// context from the extended GCD loop. syncAdd proves the synchronized
+// wrap/no-wrap property internally via AC_ge_BD_ge / AC_lt_BD_le, and
+// maintains nonLinearSub through the addition.
+//
+//go:norace
+//@ requires noPerm < p && p <= writePerm
+//@ requires X.Inv() && Z.Inv()
+//@ requires acc(Y.Inv(), p) && acc(W.Inv(), p)
+//@ requires acc(bound1.Inv(), p) && acc(bound2.Inv(), p)
+//@ requires X.AnnouncedLen() == Y.AnnouncedLen() && X.AnnouncedLen() == bound1.AnnouncedLen()
+//@ requires Z.AnnouncedLen() == W.AnnouncedLen() && Z.AnnouncedLen() == bound2.AnnouncedLen()
+//@ requires X.Repr() < bound1.Repr() && Y.Repr() < bound1.Repr() // sum < 2*bound1
+//@ requires Z.Repr() <= bound2.Repr() && W.Repr() <= bound2.Repr() // sum <= 2*bound2
+// Ghost relational preconditions:
+//@ requires A + C == X.Repr() + Y.Repr()
+//@ requires B + D == Z.Repr() + W.Repr()
+//@ requires nonLinearSub(U, A, B, bound2.Repr(), bound1.Repr())
+//@ requires nonLinearSub(V, D, C, bound1.Repr(), bound2.Repr())
+//@ requires 0 < U && U <= bound2.Repr()
+//@ requires 0 <= V && V <= bound1.Repr()
+//@ requires 0 < bound2.Repr() && bound2.Repr() < bound1.Repr()
+//@ requires 0 <= A && A < bound1.Repr()
+//@ requires 0 <= C && C < bound1.Repr()
+//@ requires 0 <= B && B <= bound2.Repr()
+//@ requires 0 <= D && D <= bound2.Repr()
+//@ ensures  X.Inv() && Z.Inv()
+//@ ensures  acc(Y.Inv(), p) && acc(W.Inv(), p)
+//@ ensures  acc(bound1.Inv(), p) && acc(bound2.Inv(), p)
+//@ ensures  X.AnnouncedLen() == old(X.AnnouncedLen())
+//@ ensures  Z.AnnouncedLen() == old(Z.AnnouncedLen())
+//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr()
+//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr() - bound1.Repr()
+//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr()
+//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr() - bound2.Repr()
+// Ghost relational postconditions:
+//@ ensures  nonLinearSub(U - V, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+//@ ensures  nonLinearSub(V - U, Z.Repr(), X.Repr(), bound1.Repr(), bound2.Repr())
+// Sync facts (for range reasoning at call sites):
+//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> old(Z.Repr()) + W.Repr() <= bound2.Repr()
+//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> old(Z.Repr()) + W.Repr() >= bound2.Repr()
+func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D uint, ghost p perm @*/) {
+	// Establish sync preconditions from nonLinearSub via AC_ge_BD_ge / AC_lt_BD_le:
+	/*@
+	ghost if A + C >= bound1.Repr() {
+		AC_ge_BD_ge(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+	} else {
+		AC_lt_BD_le(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+	}
+	@*/
+
+	c := X.add(Y /*@, p / 2 @*/)
+	Z.add(W /*@, p / 2 @*/)
+	// After add: X.Repr() is either xOld+Y (c==0) or xOld+Y-VC (c==1).
+	// Z.Repr() is either zOld+W (no overflow) or zOld+W-VC_Z (overflow).
+
+	if choice(c) == yes || X.cmpGeq(bound1 /*@, p / 2 @*/) == yes {
+		// We enter here when xOld + Y >= bound1.
+		// Case c==1: add overflowed, so xOld+Y >= VC > bound1.
+		// Case c==0, cmpGeq==yes: X.Repr() = xOld+Y >= bound1.
+		//@ assert old(X.Repr()) + Y.Repr() >= bound1.Repr()
+		// From sync property (proven by AC_ge_BD_ge above):
+		//@ assert old(Z.Repr()) + W.Repr() >= bound2.Repr()
+
+		X.sub(bound1 /*@, p / 2 @*/)
+		Z.sub(bound2 /*@, p / 2 @*/)
+		// For X: both sub-cases yield xOld + Y - bound1:
+		//   c==0: X = xOld+Y - bound1 (no borrow, since xOld+Y >= bound1)
+		//   c==1: X = (xOld+Y-VC) - bound1 + VC = xOld+Y-bound1 (borrow, VC cancels)
+		// For Z: same double-wrap cancellation applies:
+		//   Z.add didn't overflow: Z_after_add = zOld+W >= bound2, sub gives zOld+W-bound2.
+		//   Z.add overflowed: Z_after_add = zOld+W-VC < bound2 (since zOld+W <= 2*bound2, VC > bound2),
+		//     sub borrows: zOld+W-VC-bound2+VC = zOld+W-bound2.
+	}
+
+	// Prove nonLinearSub postconditions:
+	// subExpandLemma: U - V = (A + C) * bound2 - (B + D) * bound1
+	//@ subExpandLemma(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+	// In the wrap case, modAddLemma bridges:
+	//   (A + C) * bound2 - (B + D) * bound1 = X.Repr() * bound2 - Z.Repr() * bound1
+	// In the no-wrap case, X.Repr() = A + C and Z.Repr() = B + D, so the equation holds trivially.
+	/*@
+	ghost if old(X.Repr()) + Y.Repr() >= bound1.Repr() {
+		modAddLemma(A, B, C, D, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+	}
+	@*/
+	//@ assert reveal nonLinearSub(U - V, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+	//@ assert reveal nonLinearSub(V - U, Z.Repr(), X.Repr(), bound1.Repr(), bound2.Repr())
+}
+
 // DivShortVarTime calculates x = x / y and returns the remainder.
 //
 // It panics if y is zero.
 //
 //go:norace
+//@ trusted
+//@ requires false // marking that this function does not have valid spec yet
 func (x *Nat) DivShortVarTime(y uint) uint {
 	if y == 0 {
 		panic("bigmod: division by zero")
