@@ -44,7 +44,6 @@ requires acc(n.Inv(), _)
 ensures  0 <= res && res < n.ValCount()
 decreases
 pure func (n *Nat) Repr() (res uint) {
-	// TODO: is it a good idea to reveal within a pure function?
 	return let _ := reveal n.AnnouncedLen() in
 		unfolding acc(n.Inv(), _) in limbsRepr(n.limbs)
 }
@@ -159,6 +158,18 @@ func equalLimbsReprHelper(limbs1, limbs2 seq[uint], idx int) {
 	if idx != len(limbs2) {
 		equalLimbsReprHelper(limbs1, limbs2, idx + 1)
 	}
+}
+
+ghost
+requires noPerm < p
+requires acc(n.Inv(), p)
+requires n.Repr() != 0
+ensures  acc(n.Inv(), p)
+ensures  0 < n.AnnouncedLen()
+decreases
+func (n *Nat) NonZeroAnnouncedLen(ghost p perm) {
+    reveal n.Repr()
+    reveal n.AnnouncedLen()
 }
 //// end Nat ////
 

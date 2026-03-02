@@ -711,7 +711,6 @@ func minusInverseModW(x uint) uint {
 // through timing side-channels.
 //@ trusted
 //@ requires false // marking that this function does not have valid spec yet
-// TODO: verify this function
 func NewModulus(b []byte) (*Modulus, error) {
 	n := NewNat().resetToBytes(b)
 	return newModulus(n)
@@ -1384,9 +1383,8 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 		return nil, nil, errors.New("extendedGCD: both a and m are even") /*@, 0 @*/
 	}
 
-	// TODO: we need a lemma that gives us the fact that !m.IsZero ==> m.AnnouncedLen() > 0
-	assume m.AnnouncedLen() > 0
-	assume a.AnnouncedLen() > 0
+	//@ a.NonZeroAnnouncedLen(p/2)
+	//@ m.NonZeroAnnouncedLen(p/2)
 	//@ assert 0 < a.Repr() && 0 < m.Repr()
 	//@ assert a.Repr() % 2 != 0 || m.Repr() % 2 != 0
 	assume UseSynchronizedWrappingInExtendedGCD
