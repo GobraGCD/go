@@ -58,6 +58,7 @@ func ctMask(on choice) uint { return -uint(on) }
 
 // ctEq returns 1 if x == y, and 0 otherwise. The execution time of this
 // function does not depend on its inputs.
+//@ trusted
 func ctEq(x, y uint) choice {
 	// If x != y, then either x - y or y - x will generate a carry.
 	_, c1 := bits.Sub(x, y, 0)
@@ -93,6 +94,17 @@ func NewNat() (n *Nat) {
 	//@ assert reveal n.AnnouncedLen() == 0
 	//@ assert reveal exp(2, 0) == 1
 	return n
+}
+
+//@ requires  noPerm < p
+//@ preserves acc(n.Inv(), p)
+//@ ensures   res == n.AnnouncedLen()
+func natLen(n *Nat /*@, ghost p perm @*/) (res int) {
+	//@ unfold acc(n.Inv(), p/2)
+	res = len(n.limbs)
+	//@ fold acc(n.Inv(), p/2)
+	//@ assert res == reveal n.AnnouncedLen()
+	return
 }
 
 // expand expands x to n limbs, leaving its value unchanged.
@@ -136,6 +148,25 @@ func (x *Nat) reset(n int) (r *Nat) {
 	return x
 }
 
+//@ requires n.Inv()
+//@ requires n.Repr() == 0
+//@ requires 0 < n.AnnouncedLen()
+//@ ensures  n.Inv()
+//@ ensures  n.Repr() == 1
+//@ ensures  n.AnnouncedLen() == old(n.AnnouncedLen())
+func (n *Nat) setOne() {
+	//@ assert reveal n.Repr() == 0
+	//@ assert 0 < reveal n.AnnouncedLen()
+	//@ unfold n.Inv()
+	//@ oldSeq := limbsSeq(n.limbs, 0)
+	n.limbs[0] = 1
+	//@ equalLimbsReprHelperDiff(oldSeq, limbsSeq(n.limbs, 0), 0, 0)
+	//@ expZeroLemma(2)
+	//@ fold n.Inv()
+	//@ assert reveal n.Repr() == 1
+	//@ reveal n.AnnouncedLen()
+}
+
 // resetToBytes assigns x = b, where b is a slice of big-endian bytes, resizing
 // n to the appropriate size.
 //
@@ -174,8 +205,17 @@ func (x *Nat) trim() *Nat {
 //@ ensures   x.Repr() == y.Repr()
 //@ ensures   x.AnnouncedLen() == y.AnnouncedLen()
 func (x *Nat) setNat(y *Nat /*@, ghost p perm @*/) (r *Nat) {
+	//@ reveal y.AnnouncedLen()
+	//@ unfold acc(y.Inv(), p/2)
 	x.reset(len(y.limbs))
-	copy(x.limbs, y.limbs)
+	//@ reveal x.AnnouncedLen()
+	//@ unfold x.Inv()
+	copy(x.limbs, y.limbs /*@, p/4 @*/)
+	//@ equalLimbsRepr(x.limbs, y.limbs, p/4)
+	//@ fold x.Inv()
+	//@ fold acc(y.Inv(), p/2)
+	//@ assert reveal x.Repr() == reveal y.Repr()
+	//@ reveal x.AnnouncedLen()
 	return x
 }
 
@@ -563,14 +603,14 @@ func (x *Nat) BitLenVarTime() int {
 // its value. bits.Len and bits.LeadingZeros use a lookup table for the
 // low-order bits on some architectures.
 func bitLen(n uint) int {
-	len := 0
+	l := 0 // `len` is a reserved keyword for Gobra, so we use `l` instead.
 	// We assume, here and elsewhere, that comparison to zero is constant time
 	// with respect to different non-zero values.
 	for n != 0 {
-		len++
+		l++
 		n >>= 1
 	}
-	return len
+	return l
 }
 
 // Modulus is used for modular arithmetic, precomputing relevant constants.
@@ -725,7 +765,7 @@ func (m *Modulus) Nat() *Nat {
 	// Make a copy so that the caller can't modify m.nat or alias it with
 	// another Nat in a modulus operation.
 	n := NewNat()
-	n.set(m.nat)
+	n.setNat(m.nat)
 	return n
 }
 
@@ -867,7 +907,7 @@ func (x *Nat) maybeSubtractModulus(always choice, m *Modulus /*@, ghost p perm @
 func (x *Nat) Sub(y *Nat, m *Modulus) *Nat {
 	underflow := x.sub(y)
 	// If the subtraction underflowed, add m.
-	t := NewNat().set(x)
+	t := NewNat().setNat(x)
 	t.add(m.nat)
 	x.assign(choice(underflow), t)
 	return x
@@ -1099,7 +1139,7 @@ func (x *Nat) Mul(y *Nat, m *Modulus) *Nat {
 	if m.odd {
 		// A Montgomery multiplication by a value out of the Montgomery domain
 		// takes the result out of Montgomery representation.
-		xR := NewNat().set(x).montgomeryRepresentation(m) // xR = x * R mod m
+		xR := NewNat().setNat(x).montgomeryRepresentation(m) // xR = x * R mod m
 		return x.montgomeryMul(xR, y, m)                  // x = xR * y / R mod m
 	}
 
@@ -1176,7 +1216,7 @@ func (out *Nat) Exp(x *Nat, e []byte, m *Modulus) *Nat {
 		NewNat(), NewNat(), NewNat(), NewNat(), NewNat(),
 		NewNat(), NewNat(), NewNat(), NewNat(), NewNat(),
 	}
-	table[0].set(x).montgomeryRepresentation(m)
+	table[0].setNat(x).montgomeryRepresentation(m)
 	for i := 1; i < len(table); i++ {
 		table[i].montgomeryMul(table[i-1], table[0], m)
 	}
@@ -1224,8 +1264,8 @@ func (out *Nat) ExpShortVarTime(x *Nat, e uint, m *Modulus) *Nat {
 	// For short exponents, precomputing a table and using a window like in Exp
 	// doesn't pay off. Instead, we do a simple conditional square-and-multiply
 	// chain, skipping the initial run of zeroes.
-	xR := NewNat().set(x).montgomeryRepresentation(m)
-	out.set(xR)
+	xR := NewNat().setNat(x).montgomeryRepresentation(m)
+	out.setNat(xR)
 	for i := bits.UintSize - bits.Len(e) + 1; i < bits.UintSize; i++ {
 		out.montgomeryMul(out, out, m)
 		if k := (e >> (bits.UintSize - i - 1)) & 1; k != 0 {
@@ -1346,17 +1386,18 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	assume a.AnnouncedLen() > 0
 	//@ assert 0 < a.Repr() && 0 < m.Repr()
 	//@ assert a.Repr() % 2 != 0 || m.Repr() % 2 != 0
+	assume UseSynchronizedWrappingInExtendedGCD
 
-	size := max(len(a.limbs), len(m.limbs))
+	size := max(natLen(a /*@, p / 2 @*/), natLen(m /*@, p / 2 @*/))
 	u = NewNat().setNat(a /*@, p / 2 @*/).expand(size)
 	v := NewNat().setNat(m /*@, p / 2 @*/).expand(size)
 
-	A = NewNat().reset(len(m.limbs))
-	A.limbs[0] = 1
-	B := NewNat().reset(len(a.limbs))
-	C := NewNat().reset(len(m.limbs))
-	D := NewNat().reset(len(a.limbs))
-	D.limbs[0] = 1
+	A = NewNat().reset(natLen(m /*@, p / 2 @*/))
+	A.setOne()
+	B := NewNat().reset(natLen(a /*@, p / 2 @*/))
+	C := NewNat().reset(natLen(m /*@, p / 2 @*/))
+	D := NewNat().reset(natLen(a /*@, p / 2 @*/))
+	D.setOne()
 
 	// Construct Modulus wrappers for modular addition of coefficients.
 	mMod := &Modulus{nat: m}
@@ -1422,29 +1463,29 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 		if u.IsOdd(/*@ p / 2 @*/) == yes && v.IsOdd(/*@ p / 2 @*/) == yes {
 			if v.cmpGeq(u /*@, p / 4 @*/) == no {
 				//@ preU := u.Repr()
-				u.sub(v)
+				u.sub(v /*@, p / 2 @*/)
 				//@ gcdSubLemma(preU, v.Repr())
 				if UseSynchronizedWrappingInExtendedGCD {
 					syncAdd(A, C, B, D, m, a /*@, preU, v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), p / 4 @*/)
 				} else {
-					A.Add(C, &Modulus{nat: m})
-					B.Add(D, &Modulus{nat: a})
+					A.Add(C, &Modulus{nat: m} /*@, p/4, p/4 @*/)
+					B.Add(D, &Modulus{nat: a} /*@, p/4, p/4 @*/)
 				}
 			} else {
 				//@ preV := v.Repr()
-				v.sub(u)
+				v.sub(u /*@, p / 2 @*/)
 				//@ gcdSubLemma2(u.Repr(), preV)
 				if UseSynchronizedWrappingInExtendedGCD {
 					syncAdd(C, A, D, B, m, a /*@, u.Repr(), preV, A.Repr(), B.Repr(), C.Repr(), D.Repr(), p / 4 @*/)
 				} else {
-					C.Add(A, &Modulus{nat: m})
-					D.Add(B, &Modulus{nat: a})
+					C.Add(A, &Modulus{nat: m} /*@, p/4, p/4 @*/)
+					D.Add(B, &Modulus{nat: a} /*@, p/4, p/4 @*/)
 				}
 			}
 		}
 
 		// Exactly one of u and v is now even.
-		if u.IsOdd(/*@ p / 2 @*/) == v.IsOdd() {
+		if u.IsOdd(/*@ p / 2 @*/) == v.IsOdd(/*@ p / 2 @*/) {
 			panic("bigmod: internal error: u and v are not in the expected state")
 		}
 

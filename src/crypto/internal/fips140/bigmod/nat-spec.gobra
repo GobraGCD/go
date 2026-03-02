@@ -54,7 +54,17 @@ requires acc(limbs, _)
 ensures  0 <= res && res < exp(2, _W * len(limbs))
 decreases
 pure func limbsRepr(limbs []uint) (res uint) {
-	return limbsReprHelperLemma(limbs, 0)
+	return limbsReprHelperLemma(limbsSeq(limbs, 0), 0)
+}
+
+ghost
+requires  acc(limbs, _)
+requires  0 <= idx && idx <= len(limbs)
+ensures   len(limbs) - idx == len(res)
+ensures   forall j int :: { res[j] } 0 <= j && j < len(res) ==> res[j] == limbs[idx + j]
+decreases len(limbs) - idx
+pure func limbsSeq(limbs []uint, idx int) (res seq[uint]) {
+    return idx == len(limbs) ? seq[uint]{} : seq[uint]{limbs[idx]} ++ limbsSeq(limbs, idx + 1)
 }
 
 ghost
@@ -65,18 +75,19 @@ decreases
 pure func uintRange(i uint) (r uint)
 
 ghost
-requires acc(limbs, _) && 0 <= idx && idx <= len(limbs)
+requires 0 <= idx && idx <= len(limbs)
 decreases len(limbs) - idx
-pure func limbsReprHelper(limbs []uint, idx int) (res uint) {
+pure func limbsReprHelper(limbs seq[uint], idx int) (res uint) {
 	return idx == len(limbs) ? 0 : uintRange(limbs[idx]) + exp(2, _W) * limbsReprHelper(limbs, idx + 1)
 }
 
 ghost
-requires acc(limbs, _) && 0 <= idx && idx <= len(limbs)
+opaque
+requires 0 <= idx && idx <= len(limbs)
 ensures  res == limbsReprHelper(limbs, idx)
 ensures  0 <= res && res < exp(2, _W * (len(limbs) - idx))
 decreases len(limbs) - idx
-pure func limbsReprHelperLemma(limbs []uint, idx int) (res uint) {
+pure func limbsReprHelperLemma(limbs seq[uint], idx int) (res uint) {
     return let res := limbsReprHelper(limbs, idx) in
         idx == len(limbs) ? res :
             // prove for else branch
@@ -105,6 +116,25 @@ pure func mulIeqLemma(a, b, c uint) bool {
 }
 
 ghost
+requires 0 <= idx && idx <= len(limbs1)
+requires 0 <= diffIdx && diffIdx < len(limbs1)
+requires len(limbs1) == len(limbs2)
+requires forall j int :: { limbs1[j], limbs2[j] } idx <= j && j < len(limbs1) ==> (j != diffIdx ==> limbs1[j] == limbs2[j])
+ensures  diffIdx < idx ==> limbsReprHelperLemma(limbs1, idx) == limbsReprHelperLemma(limbs2, idx)
+ensures  idx <= diffIdx ==> limbsReprHelperLemma(limbs1, idx) - exp(2, (diffIdx-idx) * _W) * limbs1[diffIdx] == limbsReprHelperLemma(limbs2, idx) - exp(2, (diffIdx-idx) * _W) * limbs2[diffIdx]
+decreases len(limbs1) - idx
+func equalLimbsReprHelperDiff(limbs1, limbs2 seq[uint], idx int, diffIdx int) {
+    if idx != len(limbs1) {
+        equalLimbsReprHelperDiff(limbs1, limbs2, idx + 1, diffIdx)
+    }
+    if idx == diffIdx {
+        expZeroLemma(2)
+    } else if idx < diffIdx {
+        expLemma(2, _W, (diffIdx-(idx+1)) * _W)
+    }
+}
+
+ghost
 requires noPerm < p
 requires acc(limbs1, p) && acc(limbs2, p)
 requires len(limbs1) <= len(limbs2)
@@ -114,23 +144,20 @@ ensures  acc(limbs1, p) && acc(limbs2, p)
 ensures  limbsRepr(limbs1) == limbsRepr(limbs2)
 decreases
 func equalLimbsRepr(limbs1, limbs2 []uint, p perm) {
-    equalLimbsReprHelper(limbs1, limbs2, 0, p)
+    equalLimbsReprHelper(limbsSeq(limbs1, 0), limbsSeq(limbs2, 0), 0)
 }
 
 ghost
-requires noPerm < p
 requires 0 <= idx && idx <= len(limbs2)
-requires acc(limbs1, p) && acc(limbs2, p)
 requires len(limbs1) <= len(limbs2)
 requires forall j int :: { limbs1[j], limbs2[j] } idx <= j && j < len(limbs1) ==> limbs1[j] == limbs2[j]
 requires forall j int :: { limbs2[j] } len(limbs1) <= j && j < len(limbs2) ==> limbs2[j] == 0
-ensures  acc(limbs1, p) && acc(limbs2, p)
-ensures  idx <= len(limbs1) ==> limbsReprHelper(limbs1, idx) == limbsReprHelper(limbs2, idx)
-ensures  len(limbs1) <= idx ==> limbsReprHelper(limbs2, idx) == 0
+ensures  idx <= len(limbs1) ==> limbsReprHelperLemma(limbs1, idx) == limbsReprHelperLemma(limbs2, idx)
+ensures  len(limbs1) <= idx ==> limbsReprHelperLemma(limbs2, idx) == 0
 decreases len(limbs2) - idx
-func equalLimbsReprHelper(limbs1, limbs2 []uint, idx int, p perm) {
+func equalLimbsReprHelper(limbs1, limbs2 seq[uint], idx int) {
 	if idx != len(limbs2) {
-		equalLimbsReprHelper(limbs1, limbs2, idx + 1, p/2)
+		equalLimbsReprHelper(limbs1, limbs2, idx + 1)
 	}
 }
 //// end Nat ////
@@ -311,6 +338,7 @@ pure func exp(b, e int) (r uint) {
 }
 
 ghost
+opaque
 requires 0 < b
 requires 0 <= e1 && 0 <= e2
 ensures  exp(b, e1) * exp(b, e2) == exp(b, e1 + e2)
@@ -322,6 +350,13 @@ pure func expLemma(b, e1, e2 int) bool {
         let _ := reveal exp(b, e1) * exp(b, e2) == uint(b) * exp(b, e1 - 1) * exp(b, e2) in
         let _ := reveal exp(b, e1 + e2) == uint(b) * exp(b, (e1 - 1) + e2) in
         expLemma(b, e1 - 1, e2)
+}
+
+ghost
+ensures exp(b, 0) == 1
+decreases
+func expZeroLemma(b int) {
+    reveal exp(b, 0)
 }
 
 ghost
