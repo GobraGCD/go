@@ -1,0 +1,23 @@
+name: Verification of extendedGCD
+
+on:
+  push: # run this workflow on every push
+  pull_request: # run this workflow on every pull_request
+  merge_group: # run this workflow on every PR in the merge queue
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    container:
+      image: ghcr.io/viperproject/gobra:v26.02
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y git
+
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Verify nat.go
+        run: ./verify-gcd.sh
+        working-directory: src/crypto/internal/fips140/bigmod
