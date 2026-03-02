@@ -341,8 +341,12 @@ func (x *Nat) SetUint(y uint) *Nat {
 //
 //go:norace
 //@ trusted
-//@ requires false // marking that this function does not have valid spec yet
-func (x *Nat) Equal(y *Nat) choice {
+//@ requires noPerm < p
+//@ requires acc(x.Inv(), p) && acc(y.Inv(), p)
+//@ requires x.AnnouncedLen() == y.AnnouncedLen()
+//@ ensures  acc(x.Inv(), p) && acc(y.Inv(), p)
+//@ ensures  (r == yes) == (x.Repr() == y.Repr())
+func (x *Nat) Equal(y *Nat /*@, ghost p perm @*/) (r choice) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
 	xLimbs := x.limbs[:size]
@@ -1312,14 +1316,13 @@ func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, 
 //@ requires x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
 //@ requires a.Repr() % 2 == 1 || b.Repr() % 2 == 1 // at least one of a or b is odd
 //@ requires a.Repr() != 0 && b.Repr() != 0 // both a and b are non-zero
+// additional preconditions to make sure that the preconditions of `extendedGCD` are satisfied:
+//@ requires a.Repr() < b.Repr()
 //@ ensures  x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
 //@ ensures  err == nil ==> r == x
 //@ ensures  err == nil ==> x.Repr() == gcd(a.Repr(), b.Repr())
 //@ ensures  err != nil ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
 func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
-	// bug: we cannot simply invoke `extendedGCD` due to its
-	// preconditions!
-	// TODO: if a.Equal(b) == yes
 	u, _, err /*@, BRepr @*/ := extendedGCD(a, b /*@, p @*/)
 	if err != nil {
 		return nil, err
@@ -1342,7 +1345,7 @@ var UseSynchronizedWrappingInExtendedGCD bool
 // It is an error if either a or m is zero, or if they are both even.
 //@ requires noPerm < p && p <= writePerm
 //@ requires acc(a.Inv(), p) && acc(m.Inv(), p)
-//@ requires a.Repr() < m.Repr() // TODO move this into the function
+//@ requires a.Repr() < m.Repr()
 //@ ensures  acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ ensures  err == nil ==> u.Inv() && A.Inv()
 //@ ensures  err == nil ==> u.Repr() == gcd(a.Repr(), m.Repr())
@@ -1426,7 +1429,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//
 	// After each loop iteration, u and v only get smaller, and at least one of
 	// them shrinks by at least a factor of two.
-		// Permissions & sizes:
+	// Permissions & sizes:
 	//@ invariant acc(m.Inv(), p/2) && 0 < m.AnnouncedLen()
 	//@ invariant acc(a.Inv(), p/2) && 0 < a.AnnouncedLen()
 	//@ invariant size == gmax(a.AnnouncedLen(), m.AnnouncedLen())
