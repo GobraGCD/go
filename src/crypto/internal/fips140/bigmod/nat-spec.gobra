@@ -174,19 +174,10 @@ func (n *Nat) NonZeroAnnouncedLen(ghost p perm) {
 //// end Nat ////
 
 //// begin Modulus ////
-// it turns out that several functions operating on Modulus are happy if only the `nat` field is correct,
-// which we capture via the `natOnly` ghost field.
 pred (m *Modulus) Inv() {
     acc(m) && m.nat.Inv() &&
-    (!m.natOnly ==> m.odd == (m.nat.Repr() % 2 == 1)) &&
-    (!m.natOnly && m.odd ==> m.rr.Inv())
-}
-
-ghost
-requires acc(m.Inv(), _)
-decreases
-pure func (m *Modulus) IsNatOnly() bool {
-	return unfolding acc(m.Inv(), _) in m.natOnly
+    (m.odd == (m.nat.Repr() % 2 == 1)) &&
+    (m.odd ==> m.rr.Inv())
 }
 
 ghost

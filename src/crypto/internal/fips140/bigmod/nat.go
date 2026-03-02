@@ -632,8 +632,6 @@ type Modulus struct {
 	odd   bool
 	m0inv uint // -nat.limbs[0]⁻¹ mod _W
 	rr    *Nat // R*R for montgomeryRepresentation
-
-	//@ ghost natOnly bool
 }
 
 // rr returns R*R with R = 2^(_W * n) and n = len(m.nat.limbs).
@@ -1387,7 +1385,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ m.NonZeroAnnouncedLen(p/2)
 	//@ assert 0 < a.Repr() && 0 < m.Repr()
 	//@ assert a.Repr() % 2 != 0 || m.Repr() % 2 != 0
-	assume UseSynchronizedWrappingInExtendedGCD
+	//@ assume UseSynchronizedWrappingInExtendedGCD
 
 	size := max(natLen(a /*@, p / 2 @*/), natLen(m /*@, p / 2 @*/))
 	u = NewNat().setNat(a /*@, p / 2 @*/).expand(size)
@@ -1399,14 +1397,6 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	C := NewNat().reset(natLen(m /*@, p / 2 @*/))
 	D := NewNat().reset(natLen(a /*@, p / 2 @*/))
 	D.setOne()
-
-	// Construct Modulus wrappers for modular addition of coefficients.
-	mMod := &Modulus{nat: m}
-	//@ mMod.natOnly = true
-	//@ fold acc(mMod.Inv(), p/2)
-	aMod := &Modulus{nat: a}
-	//@ aMod.natOnly = true
-	//@ fold acc(aMod.Inv(), p/2)
 
 	// Establish relational invariants:
 	// u = a = 1*a - 0*m, so nonLinearSub(a, 1, 0, a, m) holds.
@@ -1437,11 +1427,8 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ invariant B.Inv() && B.AnnouncedLen() == a.AnnouncedLen()
 	//@ invariant C.Inv() && C.AnnouncedLen() == m.AnnouncedLen()
 	//@ invariant D.Inv() && D.AnnouncedLen() == a.AnnouncedLen()
-	//@ invariant acc(mMod.Inv(), p/2) && mMod.IsNatOnly()
-	//@ invariant acc(aMod.Inv(), p/2) && aMod.IsNatOnly()
 	// Bounds:
 	//@ invariant 0 < a.Repr() && 0 < m.Repr()
-	//@ invariant mMod.Repr() == m.Repr() && aMod.Repr() == a.Repr()
 	//@ invariant a.Repr() < m.Repr()
 	//@ invariant 0 < u.Repr() && u.Repr() <= a.Repr() // range for u
 	//@ invariant 0 <= v.Repr() && v.Repr() <= m.Repr() // range for v
@@ -1527,8 +1514,6 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 			// Open the opaque relational invariant to get the actual equation
 			// for the postcondition: u = A*a - B*m.
 			//@ assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
-			//@ unfold acc(mMod.Inv(), p/2)
-			//@ unfold acc(aMod.Inv(), p/2)
 			return u, A, nil /*@, B.Repr() @*/
 		}
 	}
