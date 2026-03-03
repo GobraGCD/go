@@ -62,9 +62,9 @@ func (*Nat) Generate(r *rand.Rand, size int) reflect.Value {
 
 func testModAddCommutative(a *Nat, b *Nat) bool {
 	m := maxModulus(uint(len(a.limbs)))
-	aPlusB := new(Nat).set(a)
+	aPlusB := new(Nat).setNat(a)
 	aPlusB.Add(b, m)
-	bPlusA := new(Nat).set(b)
+	bPlusA := new(Nat).setNat(b)
 	bPlusA.Add(a, m)
 	return aPlusB.Equal(bPlusA) == 1
 }
@@ -78,7 +78,7 @@ func TestModAddCommutative(t *testing.T) {
 
 func testModSubThenAddIdentity(a *Nat, b *Nat) bool {
 	m := maxModulus(uint(len(a.limbs)))
-	original := new(Nat).set(a)
+	original := new(Nat).setNat(a)
 	a.Sub(b, m)
 	a.Add(b, m)
 	return a.Equal(original) == 1
@@ -98,9 +98,9 @@ func TestMontgomeryRoundtrip(t *testing.T) {
 		aPlusOne := new(big.Int).SetBytes(natBytes(a))
 		aPlusOne.Add(aPlusOne, big.NewInt(1))
 		m, _ := NewModulus(aPlusOne.Bytes())
-		monty := new(Nat).set(a)
+		monty := new(Nat).setNat(a)
 		monty.montgomeryRepresentation(m)
-		aAgain := new(Nat).set(monty)
+		aAgain := new(Nat).setNat(monty)
 		aAgain.montgomeryMul(monty, one, m)
 		if a.Equal(aAgain) != 1 {
 			t.Errorf("%v != %v", a, aAgain)

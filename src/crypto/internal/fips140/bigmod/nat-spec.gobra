@@ -67,6 +67,7 @@ pure func limbsSeq(limbs []uint, idx int) (res seq[uint]) {
 }
 
 ghost
+trusted
 ensures 0 <= i && i < exp(2, _W) && r == i
 decreases
 // we have to axiomatize the range of `uint` as this is currently not
