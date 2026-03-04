@@ -89,6 +89,8 @@ const preallocLimbs = (preallocTarget + _W - 1) / _W
 //@ ensures n.Repr() == 0 && n.AnnouncedLen() == 0
 func NewNat() (n *Nat) {
 	limbs := make([]uint, 0, preallocLimbs)
+	// due to Gobra #1007, we currently need the following assumption:
+	//@ assume forall j int :: { limbs[j] } len(limbs) <= j && j < cap(limbs) ==> limbs[j] == 0
 	n = &Nat{limbs}
 	//@ fold n.Inv()
 	//@ assert reveal n.AnnouncedLen() == 0
@@ -1294,7 +1296,7 @@ func (out *Nat) ExpShortVarTime(x *Nat, e uint, m *Modulus) *Nat {
 //@ ensures !ok ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
 func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, ok bool /*@, ghost BRepr uint @*/) {
 	//@ unfold acc(m.Inv(), p/2)
-	u, A, err /*@, BRepr @*/ := extendedGCD(a, m.nat /*@, p/4 @*/)
+	u, A, err /*@, BRepr @*/ := extendedGCD(a, m.nat /*@, true, p/4 @*/)
 	//@ fold acc(m.Inv(), p/2)
 	if err != nil {
 		return x, false /*@, BRepr @*/
@@ -1313,14 +1315,12 @@ func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, 
 //@ requires x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
 //@ requires a.Repr() % 2 == 1 || b.Repr() % 2 == 1 // at least one of a or b is odd
 //@ requires a.Repr() != 0 && b.Repr() != 0 // both a and b are non-zero
-// additional preconditions to make sure that the preconditions of `extendedGCD` are satisfied:
-//@ requires a.Repr() < b.Repr()
 //@ ensures  x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
 //@ ensures  err == nil ==> r == x
 //@ ensures  err == nil ==> x.Repr() == gcd(a.Repr(), b.Repr())
 //@ ensures  err != nil ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
 func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
-	u, _, err /*@, BRepr @*/ := extendedGCD(a, b /*@, p @*/)
+	u, _, err /*@, BRepr @*/ := extendedGCD(a, b /*@, false, p @*/)
 	if err != nil {
 		return nil, err
 	}
@@ -1342,14 +1342,14 @@ var UseSynchronizedWrappingInExtendedGCD bool
 // It is an error if either a or m is zero, or if they are both even.
 //@ requires noPerm < p && p <= writePerm
 //@ requires acc(a.Inv(), p) && acc(m.Inv(), p)
-//@ requires a.Repr() < m.Repr()
+//@ requires fullProof ==> a.Repr() < m.Repr()
 //@ ensures  acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ ensures  err == nil ==> u.Inv() && A.Inv()
 //@ ensures  err == nil ==> u.Repr() == gcd(a.Repr(), m.Repr())
-//@ ensures  err == nil ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
+//@ ensures  err == nil && fullProof ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
 //@ ensures  err == nil ==> u.AnnouncedLen() == gmax(a.AnnouncedLen(), m.AnnouncedLen())
 //@ ensures  err == nil ==> A.AnnouncedLen() == m.AnnouncedLen()
-func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr uint @*/) {
+func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr uint @*/) {
 	// This is the extended binary GCD algorithm described in the Handbook of
 	// Applied Cryptography, Algorithm 14.61, adapted by BoringSSL to bound
 	// coefficients and avoid negative numbers. For more details and proof of
@@ -1398,11 +1398,15 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	D := NewNat().reset(natLen(a /*@, p / 2 @*/))
 	D.setOne()
 
-	// Establish relational invariants:
+	// Establish relational invariants (conditional on fullProof):
 	// u = a = 1*a - 0*m, so nonLinearSub(a, 1, 0, a, m) holds.
 	// v = m = 1*m - 0*a, so nonLinearSub(m, 1, 0, m, a) holds.
-	//@ assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
-	//@ assert reveal nonLinearSub(v.Repr(), D.Repr(), C.Repr(), m.Repr(), a.Repr())
+	/*@
+	ghost if fullProof {
+		assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+		assert reveal nonLinearSub(v.Repr(), D.Repr(), C.Repr(), m.Repr(), a.Repr())
+	}
+	@*/
 
 	// Before and after each loop iteration, the following hold:
 	//
@@ -1417,7 +1421,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//
 	// After each loop iteration, u and v only get smaller, and at least one of
 	// them shrinks by at least a factor of two.
-	// Permissions & sizes:
+	// Unconditional invariants — permissions & sizes:
 	//@ invariant acc(m.Inv(), p/2) && 0 < m.AnnouncedLen()
 	//@ invariant acc(a.Inv(), p/2) && 0 < a.AnnouncedLen()
 	//@ invariant size == gmax(a.AnnouncedLen(), m.AnnouncedLen())
@@ -1427,23 +1431,24 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ invariant B.Inv() && B.AnnouncedLen() == a.AnnouncedLen()
 	//@ invariant C.Inv() && C.AnnouncedLen() == m.AnnouncedLen()
 	//@ invariant D.Inv() && D.AnnouncedLen() == a.AnnouncedLen()
-	// Bounds:
+	// Unconditional invariants — GCD-related bounds:
 	//@ invariant 0 < a.Repr() && 0 < m.Repr()
-	//@ invariant a.Repr() < m.Repr()
 	//@ invariant 0 < u.Repr() && u.Repr() <= a.Repr() // range for u
 	//@ invariant 0 <= v.Repr() && v.Repr() <= m.Repr() // range for v
-	//@ invariant 0 <= A.Repr() && A.Repr() < m.Repr() // range for A
-	//@ invariant 0 <= B.Repr() && B.Repr() < a.Repr() // range for B; stronger than fiat-crypto's B ≤ a
-	//@ invariant 0 <= C.Repr() && C.Repr() < m.Repr() // range for C
-	//@ invariant 0 <= D.Repr() && D.Repr() <= a.Repr() // range for D
-	// Parity: at least one of a,m is odd:
+	// Unconditional invariants — parity:
 	//@ invariant a.Repr() % 2 == 1 || m.Repr() % 2 == 1
-	// Parity: at least one of u,v is odd (since gcd is odd).
 	//@ invariant u.Repr() % 2 == 1 || v.Repr() % 2 == 1
+	// Unconditional invariant — GCD preservation:
 	//@ invariant gcd(u.Repr(), v.Repr()) == gcd(a.Repr(), m.Repr())
-	// Relational invariants (abstract to avoid NIA):
-	//@ invariant nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
-	//@ invariant nonLinearSub(v.Repr(), D.Repr(), C.Repr(), m.Repr(), a.Repr())
+	// Conditional invariants — coefficient proof (only when fullProof):
+	//@ invariant fullProof ==> a.Repr() < m.Repr()
+	//@ invariant fullProof ==> 0 <= A.Repr() && A.Repr() < m.Repr() // range for A
+	//@ invariant fullProof ==> 0 <= B.Repr() && B.Repr() < a.Repr() // range for B; stronger than fiat-crypto's B ≤ a
+	//@ invariant fullProof ==> 0 <= C.Repr() && C.Repr() < m.Repr() // range for C
+	//@ invariant fullProof ==> 0 <= D.Repr() && D.Repr() <= a.Repr() // range for D
+	// Conditional invariants — relational (abstract to avoid NIA):
+	//@ invariant fullProof ==> nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+	//@ invariant fullProof ==> nonLinearSub(v.Repr(), D.Repr(), C.Repr(), m.Repr(), a.Repr())
 	//@ decreases u.Repr() + v.Repr()
 	for {
 		// If both u and v are odd, subtract the smaller from the larger.
@@ -1454,7 +1459,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 				u.sub(v /*@, p / 2 @*/)
 				//@ gcdSubLemma(preU, v.Repr())
 				if UseSynchronizedWrappingInExtendedGCD {
-					syncAdd(A, C, B, D, m, a /*@, preU, v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), p / 4 @*/)
+					syncAdd(A, C, B, D, m, a /*@, preU, v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), fullProof, p / 4 @*/)
 				} else {
 					A.Add(C, &Modulus{nat: m} /*@, p/4, p/4 @*/)
 					B.Add(D, &Modulus{nat: a} /*@, p/4, p/4 @*/)
@@ -1464,7 +1469,7 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 				v.sub(u /*@, p / 2 @*/)
 				//@ gcdSubLemma2(u.Repr(), preV)
 				if UseSynchronizedWrappingInExtendedGCD {
-					syncAdd(C, A, D, B, m, a /*@, u.Repr(), preV, A.Repr(), B.Repr(), C.Repr(), D.Repr(), p / 4 @*/)
+					syncAdd(C, A, D, B, m, a /*@, u.Repr(), preV, A.Repr(), B.Repr(), C.Repr(), D.Repr(), fullProof, p / 4 @*/)
 				} else {
 					C.Add(A, &Modulus{nat: m} /*@, p/4, p/4 @*/)
 					D.Add(B, &Modulus{nat: a} /*@, p/4, p/4 @*/)
@@ -1483,28 +1488,52 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 			rshift1(u, 0)
 			//@ gcdHalfLemma(preU, v.Repr())
 			if A.IsOdd(/*@ p / 2 @*/) == yes || B.IsOdd(/*@ p / 2 @*/) == yes {
-				//@ parityLemma(preU, A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				/*@ 
+				ghost if fullProof {
+					parityLemma(preU, A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				}
+				@*/
 				rshift1(A, A.add(m /*@, p / 4 @*/))
 				rshift1(B, B.add(a /*@, p / 4 @*/))
-				//@ halvRelLemmaU2(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				/*@
+				ghost if fullProof {
+					halvRelLemmaU2(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				}
+				@*/
 			} else {
 				rshift1(A, 0)
 				rshift1(B, 0)
-				//@ halvRelLemmaU1(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				/*@
+				ghost if fullProof {
+					halvRelLemmaU1(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+				}
+				@*/
 			}
 		} else { // v.IsOdd() == no
 			//@ preV := v.Repr()
 			rshift1(v, 0)
 			//@ gcdHalfLemma2(u.Repr(), preV)
 			if C.IsOdd(/*@ p / 2 @*/) == yes || D.IsOdd(/*@ p / 2 @*/) == yes {
-				//@ parityLemmaV(preV, C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				/*@
+				ghost if fullProof {
+					parityLemmaV(preV, C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				}
+				@*/
 				rshift1(C, C.add(m /*@, p / 4 @*/))
 				rshift1(D, D.add(a /*@, p / 4 @*/))
-				//@ halvRelLemmaV2(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				/*@
+				ghost if fullProof {
+					halvRelLemmaV2(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				}
+				@*/
 			} else {
 				rshift1(C, 0)
 				rshift1(D, 0)
-				//@ halvRelLemmaV1(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				/*@
+				ghost if fullProof {
+					halvRelLemmaV1(v.Repr(), C.Repr(), D.Repr(), a.Repr(), m.Repr())
+				}
+				@*/
 			}
 		}
 
@@ -1512,8 +1541,12 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 			// v == 0, so gcd(u, 0) == u (base case of gcd)
 			//@ gcdBaseLemma(u.Repr())
 			// Open the opaque relational invariant to get the actual equation
-			// for the postcondition: u = A*a - B*m.
-			//@ assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+			// for the postcondition: u = A*a - B*m (only when fullProof).
+			/*@
+			ghost if fullProof {
+				assert reveal nonLinearSub(u.Repr(), A.Repr(), B.Repr(), a.Repr(), m.Repr())
+			}
+			@*/
 			return u, A, nil /*@, B.Repr() @*/
 		}
 	}
@@ -1556,48 +1589,54 @@ func rshift1(a *Nat, carry uint) {
 // maintains nonLinearSub through the addition.
 //
 //go:norace
+// Unconditional preconditions (permissions & sizes):
 //@ requires noPerm < p && p <= writePerm
 //@ requires X.Inv() && Z.Inv()
 //@ requires acc(Y.Inv(), p) && acc(W.Inv(), p)
 //@ requires acc(bound1.Inv(), p) && acc(bound2.Inv(), p)
 //@ requires X.AnnouncedLen() == Y.AnnouncedLen() && X.AnnouncedLen() == bound1.AnnouncedLen()
 //@ requires Z.AnnouncedLen() == W.AnnouncedLen() && Z.AnnouncedLen() == bound2.AnnouncedLen()
-//@ requires X.Repr() < bound1.Repr() && Y.Repr() < bound1.Repr() // sum < 2*bound1
-//@ requires Z.Repr() <= bound2.Repr() && W.Repr() <= bound2.Repr() // sum <= 2*bound2
-// Ghost relational preconditions:
-//@ requires A + C == X.Repr() + Y.Repr()
-//@ requires B + D == Z.Repr() + W.Repr()
-//@ requires nonLinearSub(U, A, B, bound2.Repr(), bound1.Repr())
-//@ requires nonLinearSub(V, D, C, bound1.Repr(), bound2.Repr())
-//@ requires 0 < U && U <= bound2.Repr()
-//@ requires 0 <= V && V <= bound1.Repr()
-//@ requires 0 < bound2.Repr() && bound2.Repr() < bound1.Repr()
-//@ requires 0 <= A && A < bound1.Repr()
-//@ requires 0 <= C && C < bound1.Repr()
-//@ requires 0 <= B && B <= bound2.Repr()
-//@ requires 0 <= D && D <= bound2.Repr()
+// Conditional preconditions (coefficient proof, only when fullProof):
+//@ requires fullProof ==> X.Repr() < bound1.Repr() && Y.Repr() < bound1.Repr() // sum < 2*bound1
+//@ requires fullProof ==> Z.Repr() <= bound2.Repr() && W.Repr() <= bound2.Repr() // sum <= 2*bound2
+// Ghost relational preconditions (conditional):
+//@ requires fullProof ==> A + C == X.Repr() + Y.Repr()
+//@ requires fullProof ==> B + D == Z.Repr() + W.Repr()
+//@ requires fullProof ==> nonLinearSub(U, A, B, bound2.Repr(), bound1.Repr())
+//@ requires fullProof ==> nonLinearSub(V, D, C, bound1.Repr(), bound2.Repr())
+//@ requires fullProof ==> 0 < U && U <= bound2.Repr()
+//@ requires fullProof ==> 0 <= V && V <= bound1.Repr()
+//@ requires fullProof ==> 0 < bound2.Repr() && bound2.Repr() < bound1.Repr()
+//@ requires fullProof ==> 0 <= A && A < bound1.Repr()
+//@ requires fullProof ==> 0 <= C && C < bound1.Repr()
+//@ requires fullProof ==> 0 <= B && B <= bound2.Repr()
+//@ requires fullProof ==> 0 <= D && D <= bound2.Repr()
+// Unconditional postconditions (permissions & sizes):
 //@ ensures  X.Inv() && Z.Inv()
 //@ ensures  acc(Y.Inv(), p) && acc(W.Inv(), p)
 //@ ensures  acc(bound1.Inv(), p) && acc(bound2.Inv(), p)
 //@ ensures  X.AnnouncedLen() == old(X.AnnouncedLen())
 //@ ensures  Z.AnnouncedLen() == old(Z.AnnouncedLen())
-//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr()
-//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr() - bound1.Repr()
-//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr()
-//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr() - bound2.Repr()
-// Ghost relational postconditions:
-//@ ensures  nonLinearSub(U - V, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
-//@ ensures  nonLinearSub(V - U, Z.Repr(), X.Repr(), bound1.Repr(), bound2.Repr())
-// Sync facts (for range reasoning at call sites):
-//@ ensures  old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> old(Z.Repr()) + W.Repr() <= bound2.Repr()
-//@ ensures  old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> old(Z.Repr()) + W.Repr() >= bound2.Repr()
-func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D uint, ghost p perm @*/) {
+// Conditional postconditions (coefficient proof):
+//@ ensures  fullProof ==> (old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr())
+//@ ensures  fullProof ==> (old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> X.Repr() == old(X.Repr()) + Y.Repr() - bound1.Repr())
+//@ ensures  fullProof ==> (old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr())
+//@ ensures  fullProof ==> (old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> Z.Repr() == old(Z.Repr()) + W.Repr() - bound2.Repr())
+// Ghost relational postconditions (conditional):
+//@ ensures  fullProof ==> nonLinearSub(U - V, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+//@ ensures  fullProof ==> nonLinearSub(V - U, Z.Repr(), X.Repr(), bound1.Repr(), bound2.Repr())
+// Sync facts (for range reasoning at call sites, conditional):
+//@ ensures  fullProof ==> (old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> old(Z.Repr()) + W.Repr() <= bound2.Repr())
+//@ ensures  fullProof ==> (old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> old(Z.Repr()) + W.Repr() >= bound2.Repr())
+func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D uint, ghost fullProof bool, ghost p perm @*/) {
 	// Establish sync preconditions from nonLinearSub via AC_ge_BD_ge / AC_lt_BD_le:
 	/*@
-	ghost if A + C >= bound1.Repr() {
-		AC_ge_BD_ge(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
-	} else {
-		AC_lt_BD_le(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+	ghost if fullProof {
+		ghost if A + C >= bound1.Repr() {
+			AC_ge_BD_ge(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+		} else {
+			AC_lt_BD_le(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+		}
 	}
 	@*/
 
@@ -1610,9 +1649,17 @@ func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D uint, g
 		// We enter here when xOld + Y >= bound1.
 		// Case c==1: add overflowed, so xOld+Y >= VC > bound1.
 		// Case c==0, cmpGeq==yes: X.Repr() = xOld+Y >= bound1.
-		//@ assert old(X.Repr()) + Y.Repr() >= bound1.Repr()
+		/*@
+		ghost if fullProof {
+			assert old(X.Repr()) + Y.Repr() >= bound1.Repr()
+		}
+		@*/
 		// From sync property (proven by AC_ge_BD_ge above):
-		//@ assert old(Z.Repr()) + W.Repr() >= bound2.Repr()
+		/*@
+		ghost if fullProof {
+			assert old(Z.Repr()) + W.Repr() >= bound2.Repr()
+		}
+		@*/
 
 		X.sub(bound1 /*@, p / 2 @*/)
 		Z.sub(bound2 /*@, p / 2 @*/)
@@ -1625,19 +1672,21 @@ func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D uint, g
 		//     sub borrows: zOld+W-VC-bound2+VC = zOld+W-bound2.
 	}
 
-	// Prove nonLinearSub postconditions:
-	// subExpandLemma: U - V = (A + C) * bound2 - (B + D) * bound1
-	//@ subExpandLemma(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
-	// In the wrap case, modAddLemma bridges:
-	//   (A + C) * bound2 - (B + D) * bound1 = X.Repr() * bound2 - Z.Repr() * bound1
-	// In the no-wrap case, X.Repr() = A + C and Z.Repr() = B + D, so the equation holds trivially.
+	// Prove nonLinearSub postconditions (conditional on fullProof):
 	/*@
-	ghost if old(X.Repr()) + Y.Repr() >= bound1.Repr() {
-		modAddLemma(A, B, C, D, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+	ghost if fullProof {
+		// subExpandLemma: U - V = (A + C) * bound2 - (B + D) * bound1
+		subExpandLemma(U, V, A, B, C, D, bound2.Repr(), bound1.Repr())
+		// In the wrap case, modAddLemma bridges:
+		//   (A + C) * bound2 - (B + D) * bound1 = X.Repr() * bound2 - Z.Repr() * bound1
+		// In the no-wrap case, X.Repr() = A + C and Z.Repr() = B + D, so the equation holds trivially.
+		ghost if old(X.Repr()) + Y.Repr() >= bound1.Repr() {
+			modAddLemma(A, B, C, D, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+		}
+		assert reveal nonLinearSub(U - V, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
+		assert reveal nonLinearSub(V - U, Z.Repr(), X.Repr(), bound1.Repr(), bound2.Repr())
 	}
 	@*/
-	//@ assert reveal nonLinearSub(U - V, X.Repr(), Z.Repr(), bound2.Repr(), bound1.Repr())
-	//@ assert reveal nonLinearSub(V - U, Z.Repr(), X.Repr(), bound1.Repr(), bound2.Repr())
 }
 
 // DivShortVarTime calculates x = x / y and returns the remainder.
