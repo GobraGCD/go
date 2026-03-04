@@ -221,7 +221,7 @@ ghost
 requires 0 < b && b < a
 ensures  gcd(a, b) == gcd(a - b, b)
 decreases
-func gcdSubLemma(a, b uint) {
+func gcd_sub_diag_l(a, b uint) {
     reveal gcd(a, b)       // gcd(a, b) == gcd(b, a % b)
     reveal gcd(a - b, b)   // gcd(a-b, b) == gcd(b, (a-b) % b)
     modSubLemma(a, b)      // a % b == (a - b) % b
@@ -247,12 +247,12 @@ ghost
 requires 0 < a && a <= b
 ensures gcd(a, b) == gcd(a, b - a)
 decreases
-func gcdSubLemma2(a, b uint) {
+func gcd_sub_diag_l2(a, b uint) {
     if a == b {
         reveal gcd(a, a)
     } else {
         gcdCommLemma(a, b)
-        gcdSubLemma(b, a)
+        gcd_sub_diag_l(b, a)
         gcdCommLemma(b - a, a)
     }
 }
@@ -262,33 +262,33 @@ ghost
 requires 0 <= a && 0 <= b && a % 2 == 0 && b % 2 == 1
 ensures gcd(a, b) == gcd(a / 2, b)
 decreases a + b
-func gcdHalfLemma(a, b uint) {
+func gcd_even_odd_div2(a, b uint) {
     if a == 0 {
         // gcd(0, b) == gcd(0, b) trivially
     } else if a < b {
         // Chain: gcd(a,b) = gcd(a,b-a) = gcd(a/2,b-a) = gcd(a/2,b-a/2) = gcd(a/2,b)
-        gcdSubLemma2(a, b)              // gcd(a, b) == gcd(a, b - a)
-        gcdHalfLemma(a, b - a)          // IH: gcd(a, b-a) == gcd(a/2, b-a)
-        gcdSubLemma2(a / 2, b - a / 2)  // gcd(a/2, b-a/2) == gcd(a/2, b-a)
-        gcdSubLemma2(a / 2, b)           // gcd(a/2, b) == gcd(a/2, b-a/2)
+        gcd_sub_diag_l2(a, b)              // gcd(a, b) == gcd(a, b - a)
+        gcd_even_odd_div2(a, b - a)          // IH: gcd(a, b-a) == gcd(a/2, b-a)
+        gcd_sub_diag_l2(a / 2, b - a / 2)  // gcd(a/2, b-a/2) == gcd(a/2, b-a)
+        gcd_sub_diag_l2(a / 2, b)           // gcd(a/2, b) == gcd(a/2, b-a/2)
     } else if a == 2 * b {
         // gcd(2b, b) = gcd(b, b) = gcd(a/2, b)
-        gcdSubLemma(a, b)
+        gcd_sub_diag_l(a, b)
     } else if a < 2 * b {
         // b < a < 2b. Chain uses subtraction, commutativity, and IH.
-        gcdSubLemma(a, b)                // gcd(a, b) == gcd(a-b, b)
+        gcd_sub_diag_l(a, b)                // gcd(a, b) == gcd(a-b, b)
         gcdCommLemma(a - b, b)           // gcd(a-b, b) == gcd(b, a-b)
-        gcdSubLemma(b, a - b)            // gcd(b, a-b) == gcd(2b-a, a-b)
-        gcdHalfLemma(2 * b - a, a - b)   // IH: gcd(2b-a, a-b) == gcd(b-a/2, a-b)
-        gcdSubLemma2(b - a / 2, a / 2)   // gcd(b-a/2, a/2) == gcd(b-a/2, a-b)
-        gcdSubLemma(b, a / 2)            // gcd(b, a/2) == gcd(b-a/2, a/2)
+        gcd_sub_diag_l(b, a - b)            // gcd(b, a-b) == gcd(2b-a, a-b)
+        gcd_even_odd_div2(2 * b - a, a - b)   // IH: gcd(2b-a, a-b) == gcd(b-a/2, a-b)
+        gcd_sub_diag_l2(b - a / 2, a / 2)   // gcd(b-a/2, a/2) == gcd(b-a/2, a-b)
+        gcd_sub_diag_l(b, a / 2)            // gcd(b, a/2) == gcd(b-a/2, a/2)
         gcdCommLemma(a / 2, b)           // gcd(a/2, b) == gcd(b, a/2)
     } else {
         // a > 2b. Chain: gcd(a,b) = gcd(a-b,b) = gcd(a-2b,b) = gcd(a/2-b,b) = gcd(a/2,b)
-        gcdSubLemma(a, b)                // gcd(a, b) == gcd(a-b, b)
-        gcdSubLemma(a - b, b)            // gcd(a-b, b) == gcd(a-2b, b)
-        gcdHalfLemma(a - 2 * b, b)       // IH: gcd(a-2b, b) == gcd((a-2b)/2, b)
-        gcdSubLemma(a / 2, b)            // gcd(a/2, b) == gcd(a/2-b, b)
+        gcd_sub_diag_l(a, b)                // gcd(a, b) == gcd(a-b, b)
+        gcd_sub_diag_l(a - b, b)            // gcd(a-b, b) == gcd(a-2b, b)
+        gcd_even_odd_div2(a - 2 * b, b)       // IH: gcd(a-2b, b) == gcd((a-2b)/2, b)
+        gcd_sub_diag_l(a / 2, b)            // gcd(a/2, b) == gcd(a/2-b, b)
     }
 }
 
@@ -297,9 +297,9 @@ ghost
 requires 0 <= a && 0 <= b && b % 2 == 0 && a % 2 == 1
 ensures gcd(a, b) == gcd(a, b / 2)
 decreases
-func gcdHalfLemma2(a, b uint) {
+func gcd_even_odd_div2_2(a, b uint) {
     gcdCommLemma(a, b)     // gcd(a, b) == gcd(b, a)
-    gcdHalfLemma(b, a)     // gcd(b, a) == gcd(b / 2, a)
+    gcd_even_odd_div2(b, a)     // gcd(b, a) == gcd(b / 2, a)
     gcdCommLemma(b / 2, a) // gcd(b / 2, a) == gcd(a, b / 2)
 }
 

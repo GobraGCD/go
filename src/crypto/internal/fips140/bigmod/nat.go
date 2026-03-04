@@ -37,7 +37,7 @@ type choice uint
 //@ ensures  r.isValid() && r.Repr() == !c.Repr()
 //@ decreases
 //@ pure
-func not(c choice) (r choice) {
+func (c choice) not() (r choice) {
 	return 1 ^ c
 }
 
@@ -46,7 +46,7 @@ func not(c choice) (r choice) {
 //@ ensures  r.isValid() && r.Repr() == (a.Repr() || b.Repr())
 //@ decreases
 //@ pure
-func or(a, b choice) (r choice) {
+func (a choice) or(b choice) (r choice) {
 	return a | b
 }
 
@@ -87,6 +87,7 @@ const preallocLimbs = (preallocTarget + _W - 1) / _W
 // NewNat inlines, so the allocation can live on the stack.
 //@ ensures n.Inv()
 //@ ensures n.Repr() == 0 && n.AnnouncedLen() == 0
+//@ decreases
 func NewNat() (n *Nat) {
 	limbs := make([]uint, 0, preallocLimbs)
 	// due to Gobra #1007, we currently need the following assumption:
@@ -101,6 +102,7 @@ func NewNat() (n *Nat) {
 //@ requires  noPerm < p
 //@ preserves acc(n.Inv(), p)
 //@ ensures   res == n.AnnouncedLen()
+//@ decreases
 func natLen(n *Nat /*@, ghost p perm @*/) (res int) {
 	//@ unfold acc(n.Inv(), p/2)
 	res = len(n.limbs)
@@ -116,6 +118,7 @@ func natLen(n *Nat /*@, ghost p perm @*/) (res int) {
 //@ ensures  x.Inv()
 //@ ensures  x.AnnouncedLen() == n
 //@ ensures  x.Repr() == old(x.Repr())
+//@ decreases
 func (x *Nat) expand(n int) (r *Nat) {
 	if len(x.limbs) > n {
 		panic("bigmod: internal error: shrinking nat")
@@ -139,6 +142,7 @@ func (x *Nat) expand(n int) (r *Nat) {
 //@ ensures   r == x
 //@ ensures   x.Repr() == 0
 //@ ensures   x.AnnouncedLen() == n
+//@ decreases
 func (x *Nat) reset(n int) (r *Nat) {
 	if cap(x.limbs) < n {
 		x.limbs = make([]uint, n)
@@ -156,6 +160,7 @@ func (x *Nat) reset(n int) (r *Nat) {
 //@ ensures  n.Inv()
 //@ ensures  n.Repr() == 1
 //@ ensures  n.AnnouncedLen() == old(n.AnnouncedLen())
+//@ decreases
 func (n *Nat) setOne() {
 	//@ assert reveal n.Repr() == 0
 	//@ assert 0 < reveal n.AnnouncedLen()
@@ -206,6 +211,7 @@ func (x *Nat) trim() *Nat {
 //@ ensures   r == x
 //@ ensures   x.Repr() == y.Repr()
 //@ ensures   x.AnnouncedLen() == y.AnnouncedLen()
+//@ decreases
 func (x *Nat) setNat(y *Nat /*@, ghost p perm @*/) (r *Nat) {
 	//@ reveal y.AnnouncedLen()
 	//@ unfold acc(y.Inv(), p/2)
@@ -368,6 +374,7 @@ func (x *Nat) Equal(y *Nat /*@, ghost p perm @*/) (r choice) {
 //@ requires  noPerm < p
 //@ preserves acc(x.Inv(), p)
 //@ ensures   r == (x.Repr() == 0 ? yes : no)
+//@ decreases
 func (x *Nat) IsZero(/*@ ghost p perm @*/) (r choice) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -387,6 +394,7 @@ func (x *Nat) IsZero(/*@ ghost p perm @*/) (r choice) {
 //@ requires  noPerm < p
 //@ preserves acc(x.Inv(), p)
 //@ ensures   r == (x.Repr() == 1 ? yes : no)
+//@ decreases
 func (x *Nat) IsOne(/*@ ghost p perm @*/) (r choice) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -422,6 +430,7 @@ func (x *Nat) IsMinusOne(m *Modulus) choice {
 //@ requires  noPerm < p
 //@ preserves acc(x.Inv(), p)
 //@ ensures   r == (x.Repr() % 2 == 1 ? yes : no)
+//@ decreases
 func (x *Nat) IsOdd(/*@ ghost p perm @*/) (r choice) {
 	if len(x.limbs) == 0 {
 		return no
@@ -457,6 +466,7 @@ func (x *Nat) TrailingZeroBitsVarTime() uint {
 //@ requires x.AnnouncedLen() == y.AnnouncedLen()
 //@ ensures  acc(x.Inv(), p) && acc(y.Inv(), p)
 //@ ensures  r == (x.Repr() >= y.Repr() ? yes : no)
+//@ decreases
 func (x *Nat) cmpGeq(y *Nat /*@, ghost p perm @*/) (r choice) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -486,6 +496,7 @@ func (x *Nat) cmpGeq(y *Nat /*@, ghost p perm @*/) (r choice) {
 //@ ensures  x.Inv() && acc(y.Inv(), p)
 //@ ensures  x.Repr() == (on.Repr() ? y.Repr() : old(x.Repr()))
 //@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+//@ decreases
 func (x *Nat) assign(on choice, y *Nat /*@, ghost p perm @*/) (r *Nat) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -513,6 +524,7 @@ func (x *Nat) assign(on choice, y *Nat /*@, ghost p perm @*/) (r *Nat) {
 //@ ensures  0 <= c && c <= 1
 //@ ensures  c == 0 ==> x.Repr() == old(x.Repr()) + y.Repr()
 //@ ensures  c == 1 ==> x.Repr() == old(x.Repr()) + y.Repr() - old(x.ValCount())
+//@ decreases
 func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -539,6 +551,7 @@ func (x *Nat) add(y *Nat /*@, ghost p perm @*/) (c uint) {
 //@ ensures  0 <= c && c <= 1
 //@ ensures  c == 0 ==> old(x.Repr()) >= y.Repr() && x.Repr() == old(x.Repr()) - y.Repr()
 //@ ensures  c == 1 ==> old(x.Repr()) < y.Repr() && x.Repr() == old(x.Repr()) - y.Repr() + old(x.ValCount())
+//@ decreases
 func (x *Nat) sub(y *Nat /*@, ghost p perm @*/) (c uint) {
 	// Eliminate bounds checks in the loop.
 	size := len(x.limbs)
@@ -888,6 +901,7 @@ func (out *Nat) resetFor(m *Modulus) *Nat {
 //@		x.Repr() == (old(x.Repr()) >= m.Repr() ? old(x.Repr()) - m.Repr() : old(x.Repr()) - m.Repr() + x.ValCount()) :
 //@		x.Repr() == old(x.Repr()) % m.Repr()
 //@ ensures  x.AnnouncedLen() == old(x.AnnouncedLen())
+//@ decreases
 func (x *Nat) maybeSubtractModulus(always choice, m *Modulus /*@, ghost p perm @*/) {
 	t := NewNat().setNat(x /*@, 1/2 @*/)
 	//@ unfold acc(m.Inv(), p)
@@ -895,7 +909,7 @@ func (x *Nat) maybeSubtractModulus(always choice, m *Modulus /*@, ghost p perm @
 	//@ fold acc(m.Inv(), p)
 	// We keep the result if x - m didn't underflow (meaning x >= m)
 	// or if always was set.
-	keep := or(not(choice(underflow)), choice(always))
+	keep := choice(underflow).not().or(choice(always))
 	x.assign(keep, t /*@, 1/2 @*/)
 }
 
@@ -944,6 +958,7 @@ func (x *Nat) SubOne(m *Modulus) *Nat {
 //@ ensures  x.Inv() && acc(y.Inv(), p) && acc(m.Inv(), q)
 //@ ensures  0 <= x.Repr() && x.Repr() < m.Repr()
 //@ ensures  x.Repr() == (old(x.Repr()) + y.Repr()) % m.Repr()
+//@ decreases
 func (x *Nat) Add(y *Nat, m *Modulus /*@, ghost p, q perm @*/) (r *Nat) {
 	overflow := x.add(y /*@, p/2 @*/)
 	x.maybeSubtractModulus(choice(overflow), m /*@, q/2 @*/)
@@ -1291,9 +1306,11 @@ func (out *Nat) ExpShortVarTime(x *Nat, e uint, m *Modulus) *Nat {
 //@ requires a.Repr() < m.Repr() // a must be reduced modulo m
 //@ ensures  x.Inv() && acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ ensures  r == x
+//@ ensures  ok ==> gcd(a.Repr(), m.Repr()) == 1
 //@ ensures  ok ==> gcd(a.Repr(), m.Repr()) == x.Repr() * a.Repr() - BRepr * m.Repr()
 //@ ensures  ok ==> x.AnnouncedLen() == m.AnnouncedLen()
 //@ ensures !ok ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
+//@ decreases
 func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, ok bool /*@, ghost BRepr uint @*/) {
 	//@ unfold acc(m.Inv(), p/2)
 	u, A, err /*@, BRepr @*/ := extendedGCD(a, m.nat /*@, true, p/4 @*/)
@@ -1318,7 +1335,9 @@ func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, 
 //@ ensures  x.Inv() && acc(a.Inv(), p) && acc(b.Inv(), p)
 //@ ensures  err == nil ==> r == x
 //@ ensures  err == nil ==> x.Repr() == gcd(a.Repr(), b.Repr())
+//@ ensures  err == nil ==> x.AnnouncedLen() == gmax(a.AnnouncedLen(), b.AnnouncedLen())
 //@ ensures  err != nil ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
+//@ decreases
 func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
 	u, _, err /*@, BRepr @*/ := extendedGCD(a, b /*@, false, p @*/)
 	if err != nil {
@@ -1349,6 +1368,7 @@ var UseSynchronizedWrappingInExtendedGCD bool
 //@ ensures  err == nil && fullProof ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
 //@ ensures  err == nil ==> u.AnnouncedLen() == gmax(a.AnnouncedLen(), m.AnnouncedLen())
 //@ ensures  err == nil ==> A.AnnouncedLen() == m.AnnouncedLen()
+//@ decreases
 func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr uint @*/) {
 	// This is the extended binary GCD algorithm described in the Handbook of
 	// Applied Cryptography, Algorithm 14.61, adapted by BoringSSL to bound
@@ -1432,7 +1452,7 @@ func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *N
 	//@ invariant C.Inv() && C.AnnouncedLen() == m.AnnouncedLen()
 	//@ invariant D.Inv() && D.AnnouncedLen() == a.AnnouncedLen()
 	// Unconditional invariants — GCD-related bounds:
-	//@ invariant 0 < a.Repr() && 0 < m.Repr()
+	//@ invariant 0 < m.Repr()
 	//@ invariant 0 < u.Repr() && u.Repr() <= a.Repr() // range for u
 	//@ invariant 0 <= v.Repr() && v.Repr() <= m.Repr() // range for v
 	// Unconditional invariants — parity:
@@ -1457,7 +1477,7 @@ func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *N
 			if v.cmpGeq(u /*@, p / 4 @*/) == no {
 				//@ preU := u.Repr()
 				u.sub(v /*@, p / 2 @*/)
-				//@ gcdSubLemma(preU, v.Repr())
+				//@ gcd_sub_diag_l(preU, v.Repr())
 				if UseSynchronizedWrappingInExtendedGCD {
 					syncAdd(A, C, B, D, m, a /*@, preU, v.Repr(), A.Repr(), B.Repr(), C.Repr(), D.Repr(), fullProof, p / 4 @*/)
 				} else {
@@ -1467,7 +1487,7 @@ func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *N
 			} else {
 				//@ preV := v.Repr()
 				v.sub(u /*@, p / 2 @*/)
-				//@ gcdSubLemma2(u.Repr(), preV)
+				//@ gcd_sub_diag_l2(u.Repr(), preV)
 				if UseSynchronizedWrappingInExtendedGCD {
 					syncAdd(C, A, D, B, m, a /*@, u.Repr(), preV, A.Repr(), B.Repr(), C.Repr(), D.Repr(), fullProof, p / 4 @*/)
 				} else {
@@ -1486,7 +1506,7 @@ func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *N
 		if u.IsOdd(/*@ p / 2 @*/) == no {
 			//@ preU := u.Repr()
 			rshift1(u, 0)
-			//@ gcdHalfLemma(preU, v.Repr())
+			//@ gcd_even_odd_div2(preU, v.Repr())
 			if A.IsOdd(/*@ p / 2 @*/) == yes || B.IsOdd(/*@ p / 2 @*/) == yes {
 				/*@ 
 				ghost if fullProof {
@@ -1512,7 +1532,7 @@ func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *N
 		} else { // v.IsOdd() == no
 			//@ preV := v.Repr()
 			rshift1(v, 0)
-			//@ gcdHalfLemma2(u.Repr(), preV)
+			//@ gcd_even_odd_div2_2(u.Repr(), preV)
 			if C.IsOdd(/*@ p / 2 @*/) == yes || D.IsOdd(/*@ p / 2 @*/) == yes {
 				/*@
 				ghost if fullProof {
@@ -1560,6 +1580,7 @@ func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *N
 //@ ensures  carry == 0 ==> a.Repr() == old(a.Repr()) / 2
 //@ ensures  carry == 1 ==> a.Repr() == (old(a.Repr()) + old(a.ValCount())) / 2
 //@ ensures  a.AnnouncedLen() == old(a.AnnouncedLen())
+//@ decreases
 func rshift1(a *Nat, carry uint) {
 	size := len(a.limbs)
 	aLimbs := a.limbs[:size]
@@ -1628,6 +1649,7 @@ func rshift1(a *Nat, carry uint) {
 // Sync facts (for range reasoning at call sites, conditional):
 //@ ensures  fullProof ==> (old(X.Repr()) + Y.Repr() <  bound1.Repr() ==> old(Z.Repr()) + W.Repr() <= bound2.Repr())
 //@ ensures  fullProof ==> (old(X.Repr()) + Y.Repr() >= bound1.Repr() ==> old(Z.Repr()) + W.Repr() >= bound2.Repr())
+//@ decreases
 func syncAdd(X, Y, Z, W, bound1, bound2 *Nat /*@, ghost U, V, A, B, C, D uint, ghost fullProof bool, ghost p perm @*/) {
 	// Establish sync preconditions from nonLinearSub via AC_ge_BD_ge / AC_lt_BD_le:
 	/*@
