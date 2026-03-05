@@ -18,9 +18,12 @@ pure func (c choice) Repr() bool {
 //// begin Nat ////
 pred (n *Nat) Inv() {
     acc(n) &&
-    (forall j int :: { &n.limbs[j] } 0 <= j && j < cap(n.limbs) ==> acc(&n.limbs[j])) &&
-    // values beyond length are zero (otherwise `reset` is incorrect):
-    (forall j int :: { n.limbs[j] } len(n.limbs) <= j && j < cap(n.limbs) ==> n.limbs[j] == 0)
+    // for automation reasons, it's better to state permissions for limbs up-to-length
+    // and beyond-length separately:
+    (forall j int :: { &n.limbs[j] } 0 <= j && j < len(n.limbs) ==> acc(&n.limbs[j])) &&
+    let allLimbs := n.limbs[:cap(n.limbs)] in
+    // we also have permissions for elements beyond length and these elements are zero (otherwise `reset` is incorrect):
+    (forall j int :: { &allLimbs[j] } len(n.limbs) <= j && j < len(allLimbs) ==> acc(&allLimbs[j]) && allLimbs[j] == 0)
 }
 
 ghost
