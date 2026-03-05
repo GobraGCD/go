@@ -37,7 +37,7 @@ type choice uint
 //@ ensures  r.isValid() && r.Repr() == !c.Repr()
 //@ decreases
 //@ pure
-func (c choice) not() (r choice) {
+func not(c choice) (r choice) {
 	return 1 ^ c
 }
 
@@ -46,7 +46,7 @@ func (c choice) not() (r choice) {
 //@ ensures  r.isValid() && r.Repr() == (a.Repr() || b.Repr())
 //@ decreases
 //@ pure
-func (a choice) or(b choice) (r choice) {
+func or(a, b choice) (r choice) {
 	return a | b
 }
 
@@ -909,7 +909,7 @@ func (x *Nat) maybeSubtractModulus(always choice, m *Modulus /*@, ghost p perm @
 	//@ fold acc(m.Inv(), p)
 	// We keep the result if x - m didn't underflow (meaning x >= m)
 	// or if always was set.
-	keep := choice(underflow).not().or(choice(always))
+	keep := or(not(choice(underflow)), choice(always))
 	x.assign(keep, t /*@, 1/2 @*/)
 }
 
