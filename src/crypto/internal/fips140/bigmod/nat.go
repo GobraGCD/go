@@ -1398,7 +1398,6 @@ func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, gho
 	//@ m.NonZeroAnnouncedLen(p/2)
 	//@ assert 0 < a.Repr() && 0 < m.Repr()
 	//@ assert a.Repr() % 2 != 0 || m.Repr() % 2 != 0
-	//@ assume UseSynchronizedWrappingInExtendedGCD
 
 	size := max(natLen(a /*@, p / 2 @*/), natLen(m /*@, p / 2 @*/))
 	u = NewNat().setNat(a /*@, p / 2 @*/).expand(size)

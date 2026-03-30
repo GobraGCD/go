@@ -8,7 +8,7 @@ fileName=$1
 isCi=$CI
 
 gobraJar="/gobra/gobra.jar"
-additionalGobraArgs="--parallelizeBranches --input nat.go nat-spec.gobra -I .verification"
+additionalGobraArgs="--parallelizeBranches --input nat.go nat-spec.gobra sync_flag_fixed.go -I .verification"
 
 if [ $isCi ]; then
     echo -e "\033[0Ksection_start:`date +%s`:verify[collapsed=true]\r\033[0KVerifying package: $packageName"
