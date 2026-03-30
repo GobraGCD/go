@@ -2,10 +2,12 @@
 set -euo pipefail
 
 # Re-exec with high priority and sleep prevention if not already done.
-if [[ -z "${BENCH_PRIORITIZED:-}" ]]; then
-  export BENCH_PRIORITIZED=1
-  exec sudo nice -n -20 caffeinate -s "$0" "$@"
-fi
+# if [[ -z "${BENCH_PRIORITIZED:-}" ]]; then
+#   export BENCH_PRIORITIZED=1
+#   echo "Run benchmarks with highest priority, which requires sudo:"
+#   sudo nice -n -20 caffeinate -s "$0" "$@"
+#   exit $?
+# fi
 
 # --- Configuration ---
 # Number of input pairs per limb size to benchmark (max 1000).
