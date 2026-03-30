@@ -389,13 +389,14 @@ func max(a, b int) (r int) {
 // Lean 4:
 /*
   // 20260226 LA: checked in Lean
-  theorem modSubLemma {a b : Int} :
+  theorem modSubLemma {a b : Int}
+      (h : 0 < b ∧ b < a) :
       a % b = (a - b) % b := by
     simp
 */
 ghost
 trusted
-requires b != 0 // required for well-formedness
+requires 0 < b && b < a
 ensures a % b == (a - b) % b
 decreases
 func modSubLemma(a, b uint)
@@ -405,7 +406,8 @@ func modSubLemma(a, b uint)
 // Lean 4:
 /*
   // 20260226 LA: checked in Lean
-  theorem prodParityLemma {a b : Int} :
+  theorem prodParityLemma {a b : Int}
+      (h : 0 ≤ a ∧ 0 ≤ b) :
       (a * b) % 2 = (a % 2) * (b % 2) := by
     rw [Int.mul_emod]
     have ha : a % 2 = 0 ∨ a % 2 = 1 := by omega
@@ -414,6 +416,7 @@ func modSubLemma(a, b uint)
 */
 ghost
 trusted
+requires 0 <= a && 0 <= b
 ensures (a * b) % 2 == (a % 2) * (b % 2)
 decreases
 func prodParityLemma(a, b uint)

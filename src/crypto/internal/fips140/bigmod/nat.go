@@ -1313,7 +1313,7 @@ func (out *Nat) ExpShortVarTime(x *Nat, e uint, m *Modulus) *Nat {
 //@ decreases
 func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, ok bool /*@, ghost BRepr uint @*/) {
 	//@ unfold acc(m.Inv(), p/2)
-	u, A, err /*@, BRepr @*/ := extendedGCD(a, m.nat /*@, true, p/4 @*/)
+	u, A, err /*@, BRepr @*/ := extendedGCD(a, m.nat /*@, p/4 @*/)
 	//@ fold acc(m.Inv(), p/2)
 	if err != nil {
 		return x, false /*@, BRepr @*/
@@ -1339,20 +1339,12 @@ func (x *Nat) InverseVarTime(a *Nat, m *Modulus /*@, ghost p perm @*/) (r *Nat, 
 //@ ensures  err != nil ==> x.Repr() == old(x.Repr()) && x.AnnouncedLen() == old(x.AnnouncedLen()) // x is not modified on failure
 //@ decreases
 func (x *Nat) GCDVarTime(a, b *Nat /*@, ghost p perm @*/) (r *Nat, err error) {
-	u, _, err /*@, BRepr @*/ := extendedGCD(a, b /*@, false, p @*/)
+	u, _, err /*@, BRepr @*/ := extendedGCD(a, b /*@, p @*/)
 	if err != nil {
 		return nil, err
 	}
 	return x.setNat(u /*@, 1/2 @*/), nil
 }
-
-// UseSynchronizedWrappingInExtendedGCD switches coefficient updates in
-// extendedGCD between the legacy modular-add path and the synchronized-wrap
-// path.
-//
-// false: legacy behavior (buggy in some edge cases)
-// true: synchronized wrapping fix
-var UseSynchronizedWrappingInExtendedGCD bool
 
 // extendedGCD computes u and A such that u = GCD(a, m) = A*a - B*m.
 //
@@ -1361,15 +1353,14 @@ var UseSynchronizedWrappingInExtendedGCD bool
 // It is an error if either a or m is zero, or if they are both even.
 //@ requires noPerm < p && p <= writePerm
 //@ requires acc(a.Inv(), p) && acc(m.Inv(), p)
-//@ requires fullProof ==> a.Repr() < m.Repr()
 //@ ensures  acc(a.Inv(), p) && acc(m.Inv(), p)
 //@ ensures  err == nil ==> u.Inv() && A.Inv()
 //@ ensures  err == nil ==> u.Repr() == gcd(a.Repr(), m.Repr())
-//@ ensures  err == nil && fullProof ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
+//@ ensures  err == nil && a.Repr() < m.Repr() ==> u.Repr() == A.Repr() * a.Repr() - BRepr * m.Repr()
 //@ ensures  err == nil ==> u.AnnouncedLen() == gmax(a.AnnouncedLen(), m.AnnouncedLen())
 //@ ensures  err == nil ==> A.AnnouncedLen() == m.AnnouncedLen()
 //@ decreases
-func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr uint @*/) {
+func extendedGCD(a, m *Nat /*@, ghost p perm @*/) (u, A *Nat, err error /*@, ghost BRepr uint @*/) {
 	// This is the extended binary GCD algorithm described in the Handbook of
 	// Applied Cryptography, Algorithm 14.61, adapted by BoringSSL to bound
 	// coefficients and avoid negative numbers. For more details and proof of
@@ -1393,6 +1384,8 @@ func extendedGCD(a, m *Nat /*@, ghost fullProof bool, ghost p perm @*/) (u, A *N
 	//    value.
 	//
 	// Note this algorithm does not handle either input being zero.
+
+	//@ fullProof := a.Repr() < m.Repr()
 
 	if a.IsZero(/*@ p / 2 @*/) == yes || m.IsZero(/*@ p / 2 @*/) == yes {
 		return nil, nil, errors.New("extendedGCD: a or m is zero") /*@, 0 @*/

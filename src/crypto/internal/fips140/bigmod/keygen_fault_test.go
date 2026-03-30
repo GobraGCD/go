@@ -1,3 +1,5 @@
+//go:build !sync_legacy && !sync_fixed
+
 package bigmod
 
 import (
