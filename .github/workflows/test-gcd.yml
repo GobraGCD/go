@@ -19,7 +19,7 @@ jobs:
           go-version: '1.24'
 
       - name: Run bigmod tests with local toolchain
-        run: ./run_with_local_toolchain.sh -v
+        run: ./run_with_local_toolchain.sh
         working-directory: src/crypto/internal/fips140/bigmod
         env:
           GOROOT_BOOTSTRAP: ${{ env.GOROOT }}
