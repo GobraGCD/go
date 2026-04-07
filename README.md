@@ -5,7 +5,7 @@
 
 This repository is a fork of the [Go standard library](https://github.com/golang/go).
 
-The [Gobra program verifier](https://gobra.ethz.ch) has successfully used to verify the `InverseVarTime`, `GCDVarTime`, and `extendedGCD` functions in the [`crypto/internal/fips140/bigmod`](https://github.com/GobraGCD/go/tree/master/src/crypto/internal/fips140/bigmod) package.
+We have successfully applied the [Gobra program verifier](https://gobra.ethz.ch) to verify the `InverseVarTime`, `GCDVarTime`, and `extendedGCD` functions in the [`crypto/internal/fips140/bigmod`](https://github.com/GobraGCD/go/tree/master/src/crypto/internal/fips140/bigmod) package.
 More specifically, Gobra takes the following three files as input and verifies them:
 - [nat.go](https://github.com/GobraGCD/go/blob/master/src/crypto/internal/fips140/bigmod/nat.go) contains the implementation of arbitrary-length natural numbers and the three functions mentioned above.
 - [nat-spec.gobra](https://github.com/GobraGCD/go/blob/master/src/crypto/internal/fips140/bigmod/nat-spec.gobra) contains ghost code such as predicate definitions and lemmata.
