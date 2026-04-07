@@ -1,4 +1,5 @@
 [![Verification of extendedGCD](https://github.com/GobraGCD/go/actions/workflows/verify-gcd.yml/badge.svg?branch=master)](https://github.com/GobraGCD/go/actions/workflows/verify-gcd.yml?query=branch%3Amaster)
+[![Test of extendedGCD](https://github.com/GobraGCD/go/actions/workflows/test-gcd.yml/badge.svg?branch=master)](https://github.com/GobraGCD/go/actions/workflows/test-gcd.yml?query=branch%3Amaster)
 
 # Verification of `extendedGCD`
 
