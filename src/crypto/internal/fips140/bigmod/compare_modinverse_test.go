@@ -2,6 +2,10 @@
 
 package bigmod
 
+// Tests Nat.InverseVarTime by comparing its output (for different
+// values of `UseSynchronizedWrappingInExtendedGCD`) to
+// `math/big.ModInverse`.
+
 import (
 	stdbig "math/big"
 	"testing"

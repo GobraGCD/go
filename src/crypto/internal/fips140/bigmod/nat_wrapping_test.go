@@ -2,6 +2,10 @@
 
 package bigmod
 
+// Tests extendedGCD by comparing its output (for different
+// values of `UseSynchronizedWrappingInExtendedGCD`) to
+// `math/big.GCD`.
+
 import (
 	stdbig "math/big"
 	"testing"
